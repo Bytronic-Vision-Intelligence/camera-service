@@ -33,6 +33,7 @@ def subscribe_listener(
     def on_message(topic: str, payload: str) -> None:
         # Handler signature used by mqtt_client.MQTTClient.subscribe
         decoded = payload
+        print(f"MQTT signal received on '{topic}': {decoded!r}")
         # Keep only the newest trigger to avoid replaying stale backlog bursts.
         try:
             result_queue.put_nowait(decoded)

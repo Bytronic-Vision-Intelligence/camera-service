@@ -64,10 +64,49 @@ class PylonCamera(Camera):
         except Exception as e:
             raise RuntimeError("Error finding camera: " + str(e)) from e
 
+    @staticmethod
+    def _set_node(node_map, name: str, value) -> None:
+        """Set one GenICam node, logging and carrying on when it is unavailable."""
+        if value is None:
+            return
+        try:
+            getattr(node_map, name).Value = value
+            logging.info("%s -> %s", name, value)
+        except Exception as e:
+            logging.warning("Could not set %s=%s: %s", name, value, e)
+
     def _apply_camera_settings(self, camera: pylon.InstantCamera) -> None:
-        """Apply optional ``camera_settings`` from the nested config (no trigger setup)."""
-        """Set as None for now, camera settings to be added when needed"""
-        return None
+        """Apply GigE stream tuning from ``camera_settings``.
+
+        pylon's defaults assume a gigabit path. This camera sits on a 100 Mb/s
+        switch port, where it outruns the wire and every frame arrives
+        incomplete (error 0xe1000014), so the throughput limit and the frame
+        retention have to match the link the camera is actually on.
+        """
+        settings = loadConfig.get_section("camera_settings")
+        node_map = camera.GetNodeMap()
+
+        # The packet payload must still fit the NIC MTU once UDP/IP/Ethernet
+        # headers are added: 1500 - 28 = 1472. Larger is dropped in silence.
+        self._set_node(node_map, "GevSCPSPacketSize", settings.get("packet_size", 1472))
+
+        throughput = settings.get("throughput_limit")
+        if throughput:
+            self._set_node(node_map, "DeviceLinkThroughputLimitMode", "On")
+            self._set_node(node_map, "DeviceLinkThroughputLimit", int(throughput))
+
+        buffers = settings.get("buffer_size")
+        if buffers:
+            try:
+                camera.MaxNumBuffer.Value = int(buffers)
+            except Exception as e:
+                logging.warning("Could not set MaxNumBuffer: %s", e)
+
+        # Host side, not camera side: these live on the stream grabber and are
+        # per-application, so setting them on the camera would not carry over.
+        stream = camera.GetStreamGrabberNodeMap()
+        self._set_node(stream, "FrameRetention", settings.get("frame_retention_ms", 3000))
+        self._set_node(stream, "PacketTimeout", settings.get("packet_timeout_ms", 500))
 
     def connect_to_camera(self, timeout_ms: int = 5000) -> pylon.InstantCamera:
         # Connect to the camera and return the camera object.

@@ -1,6 +1,6 @@
 from numpy import ndarray, uint8
 from cv2 import imencode, normalize, NORM_MINMAX, CV_8U
-from time import localtime, strftime
+from datetime import datetime
 
 
 def prepare_image_for_jpeg(image: ndarray) -> ndarray:
@@ -32,6 +32,16 @@ def encode_image_to_bytes(image: ndarray) -> bytes:
 
 
 def encode_date_time_to_bytes() -> bytes:
-    """Encode the current date and time into bytes."""
-    date_time = strftime("%Y-%m-%d %H:%M:%S", localtime())
+    """Encode the capture time as exactly 23 UTF-8 bytes.
+
+    The width is a wire contract, not a formatting choice: inference slices the
+    last 23 bytes off the packet and parses them with "%Y-%m-%d %H:%M:%S.%f".
+    A 19-byte stamp leaves 4 JPEG bytes inside that slice, and the 0xFF end-of-
+    image marker is not valid UTF-8 — so the decode raised, the timestamp stayed
+    empty, and every frame was discarded with "bad timestamp ''".
+
+    The milliseconds are load-bearing too: without them there is no resolution
+    to measure the trigger-to-capture delay with.
+    """
+    date_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
     return date_time.encode("utf-8")

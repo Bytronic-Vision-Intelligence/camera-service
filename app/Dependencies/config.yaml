@@ -1,17 +1,28 @@
-ip: localhost
+ip: localhost   # broker runs on this box; 192.168.1.x is not on this L2 fabric
 port: 1883
-trigger_topic: "tma/inference/trigger"
-image_topic: "tma/camera/image"
+trigger_topic: "tma/testing/calibration/sub"   # internal; tma/cabinet/* is the customer contract only
+image_topic: "tma/camera/image" #strobe topic sends image and timestamp as json
 trigger_time_topic: "tma/camera/trigger_time"
 message: null
 
 camera:
-  camera_type: gige
-  camera_ip: 192.168.2.10
-  serial_number: 25165090
+  camera_type: pylon
+  camera_ip: 192.168.101.175
+  serial_number: 40641303
 
 camera_settings:
-  pixel_format: BayerRG8
+  pixel_format: BayerRG8        # not applied; sensor reports BayerGB8 and the
+                                # converter demosaics from the camera's own format
+  capture_timeout_ms: 5000      # a frame takes ~1s on this link; the 1000 default races it
+  buffer_size: 16
+
+  # GigE stream tuning. The camera is on a 100 Mb/s switch port, so an 8.9 MB
+  # frame needs ~1s on the wire. pylon's defaults (120 MB/s, 300ms retention)
+  # assume gigabit and make every frame arrive incomplete (error 0xe1000014).
+  packet_size: 1472             # 1500 MTU - 28 bytes of UDP/IP headers
+  throughput_limit: 10000000    # 10 MB/s, under the ~11.5 MB/s the link can carry
+  frame_retention_ms: 3000
+  packet_timeout_ms: 500
 trigger:
   trigger_type: software
 
