@@ -1,15 +1,14 @@
 ip: localhost
 port: 1883
-trigger_topic: "tma/inference/trigger"
-image_topic: "tma/camera/image"
-trigger_time_topic: "tma/camera/trigger_time"
+trigger_topic: "indonesia/inference/trigger"
+image_topic: "indonesia/camera/image"
+trigger_time_topic: "indonesia/camera/trigger_time"
 message: null
 
 camera:
   camera_type: gige
   camera_ip: 192.168.2.10
   serial_number: 25165090
-
 camera_settings:
   pixel_format: BayerRG8
 trigger:
