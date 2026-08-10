@@ -67,9 +67,11 @@ class HardwareTriggerConfig:
     def from_app_config(cls, cfg: Optional[dict] = None) -> "HardwareTriggerConfig":
         if cfg is None:
             cfg = loadConfig.get_section("trigger")
-        trigger_type = str(cfg.get("trigger_type", "")).lower()
+        # main.py treats "external" and "hardware" as the same (GPIO/line trigger);
+        # keep this list aligned so FLIR/Spinnaker actually arms trigger setup.
+        trigger_type = str(cfg.get("trigger_type", "")).strip().lower()
         return cls(
-            enabled=trigger_type == "external",
+            enabled=trigger_type in ("external", "hardware"),
             source=str(cfg.get("trigger_source", "Line0")),
             activation=str(cfg.get("trigger_activation", "RisingEdge")),
             poll_interval_s=float(cfg.get("trigger_poll_interval_s", 0.001)),
