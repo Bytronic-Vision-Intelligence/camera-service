@@ -1,0 +1,40 @@
+ip: localhost
+port: 1883
+trigger_topic: "indonesia/inference/trigger"
+image_topic: "indonesia/camera/image"
+trigger_time_topic: "indonesia/camera/trigger_time"
+message: null
+
+camera:
+  camera_type: ljs
+  # Used when camera_type: ljs -- direct Ethernet connection to an LJ-S640
+  # head (no controller). See app/Dependencies/CameraLibrary/cameras_ljs.py.
+  ljs:
+    host: "192.168.0.1"
+    port: 24691
+    high_speed_port: 24692  # must differ from `port`
+    device_id: 0
+    program: 0               # active program number, 0-15
+    timeout_s: 5.0
+    use_image_filter: false
+    interpolate_y: 4         # repeat each Y line 1-8x to match X pitch
+    settings:               # applied to `program` on connect; see settings_ljs.py
+      exposure_time_us: 640
+      dynamic_range: 4
+      light_control_mode: "AUTO"
+      light_control_upper: 90
+      light_control_lower: 10
+      detection_sensitivity: 3
+trigger:
+  # external | hardware → frame thread; internal | software → MQTT + capture_image
+  trigger_type: internal
+
+archiving:
+  is_archived: "true"
+  archive_directory: "save_dir"
+  archive_parameters:
+    archive_freq: "daily"
+    archive_storage: 50 # GB
+    archive_days: 30 # days
+    # Archived PNGs keep original values (uint16 counts / encoded float mm).
+    # LJS: mm = (pixel - 32768) / 100 ; pixel 0 = invalid.

@@ -1,0 +1,34 @@
+ip: localhost
+port: 1883
+trigger_topic: "indonesia/inference/trigger"
+image_topic: "indonesia/camera/image"
+trigger_time_topic: "indonesia/camera/trigger_time"
+message: null
+
+camera:
+  camera_type: flir
+  camera_id: 1
+  serial_number: 73400462
+
+camera_settings:
+  buffer_size: 0
+  # AX5 raw radiometric stream (default camera is 8-bit — that keeps pixels 0–255)
+  pixel_format: Mono14
+  cmos_bit_depth: bit14bit
+  # true = temperature-linear counts; false = raw 14-bit signal
+  temperature_linear_mode: true
+
+trigger:
+  trigger_type: external
+  # AX5: Line0 is the opto-isolated GPI (light gate). Keep Line0 unless wiring differs.
+  trigger_source: Line0
+  # RisingEdge / FallingEdge / AnyEdge — flip if the gate is idle-high vs idle-low
+  trigger_activation: RisingEdge
+
+archiving:
+  is_archived: "true"
+  archive_directory: "../save_dir"
+  archive_parameters:
+    archive_freq: "hourly"
+    archive_storage: 50 # GB
+    archive_days: 30 # days

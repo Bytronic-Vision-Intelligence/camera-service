@@ -1,0 +1,28 @@
+ip: localhost
+port: 1883
+trigger_topic: "indonesia/inference/trigger"
+image_topic: "indonesia/camera/image"
+trigger_time_topic: "indonesia/camera/trigger_time"
+message: null
+
+camera:
+  camera_type: pylon
+  # Optional. Leave empty to open the first Basler device found by pypylon.
+  # Set to the camera serial string to select a specific device.
+  serial_number: ""
+
+camera_settings:
+  buffer_size: 0
+  # Pylon camera_settings are reserved; _apply_camera_settings is a no-op for now.
+
+trigger:
+  # external | hardware → frame thread; internal | software → MQTT + capture_image
+  trigger_type: internal
+
+archiving:
+  is_archived: "true"
+  archive_directory: "save_dir"
+  archive_parameters:
+    archive_freq: "daily"
+    archive_storage: 50 # GB
+    archive_days: 30 # days
