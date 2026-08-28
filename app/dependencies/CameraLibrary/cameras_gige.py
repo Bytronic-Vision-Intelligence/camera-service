@@ -22,6 +22,28 @@ CTI_CANDIDATES = [
 ]
 
 
+def _genicam_enum_value(value: str) -> str:
+    """Map config strings like ``strobe`` to GenICam symbols like ``Strobe``."""
+    s = str(value).strip()
+    if not s:
+        return s
+    if s.islower() or s.isupper():
+        return s.capitalize()
+    return s
+
+
+def _line_selector_name(line) -> str:
+    s = str(line).strip()
+    if not s:
+        return s
+    if s.lower().startswith("line"):
+        suffix = s[4:]
+        return f"Line{suffix}" if suffix.isdigit() else s
+    if s.isdigit():
+        return f"Line{s}"
+    return s
+
+
 class GigeCamera(Camera):
     def __init__(self):
         super().__init__()
@@ -121,6 +143,39 @@ class GigeCamera(Camera):
         except Exception:
             self.pixel_format = pixel_format or None
 
+    def _apply_lights_settings(self, camera) -> None:
+        """Apply optional ``lights`` config (digital output / strobe line)."""
+        cfg = loadConfig.get_section("lights")
+        if not cfg:
+            return
+
+        line = cfg.get("line")
+        if line is None or str(line).strip() == "":
+            return
+
+        line_selector = _line_selector_name(line)
+        line_mode = _genicam_enum_value(str(cfg.get("line_mode") or "strobe"))
+        line_source = _genicam_enum_value(str(cfg.get("line_source") or "ExposureActive"))
+
+        nm = camera.remote_device.node_map
+        try:
+            nm.LineSelector.value = line_selector
+            nm.LineMode.value = line_mode
+            if line_mode.lower() != "input":
+                nm.LineSource.value = line_source
+        except Exception as e:
+            raise RuntimeError(
+                f"Failed configuring lights (line={line_selector}, "
+                f"mode={line_mode}, source={line_source})"
+            ) from e
+
+        logging.info(
+            "Lights configured: LineSelector=%s LineMode=%s LineSource=%s",
+            line_selector,
+            line_mode,
+            line_source if line_mode.lower() != "input" else "n/a",
+        )
+
     def connect_to_camera(self, timeout_ms: int = 5000):
         # Connect to the camera and return the camera object.
         # Function returns the camera object.
@@ -146,6 +201,7 @@ class GigeCamera(Camera):
                     continue
 
             self._apply_camera_settings(self.cam)
+            self._apply_lights_settings(self.cam)
 
             # GigE trigger_type:
             #   hardware    → line trigger (frame thread)
