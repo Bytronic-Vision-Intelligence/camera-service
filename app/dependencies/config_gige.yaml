@@ -11,8 +11,13 @@ camera:
   serial_number: 25165090
 camera_settings:
   pixel_format: BayerRG8
+
 trigger:
   trigger_type: software
+
+lights:
+  line: 1
+  line_mode: strobe
 
 archiving:
   is_archived: "true"
