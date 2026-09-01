@@ -45,3 +45,23 @@ act bind-mounts the working tree rather than doing a fresh `git checkout`. Any
 defect that lives in the difference between your working tree and what git
 actually has — a file renamed only by case, an untracked file the CI would
 never see — will pass here and fail on GitHub.
+
+## A note on `--fresh`
+
+`act-toolcache` is a single Docker volume shared by **every** repo using this
+runner, not one per project. That is why a stale cache from another service can
+surface here.
+
+`--fresh` wipes it, but the first run afterwards can fail spuriously:
+`setup-python` resolves a Python build for the runner it thinks it is on
+(e.g. `python-3.10.21-linux-24.04-x64.tar.gz`) which may not match the
+`catthehacker/ubuntu` image, giving:
+
+```
+./setup.sh: line 55: ./python: No such file or directory   (exit 127)
+```
+
+Run it a second time without `--fresh`. Once one leg has populated the cache,
+subsequent legs find it there and skip the download. Reach for `--fresh` only
+when you have changed `requirements.txt` and suspect a stale package, and
+expect to run twice.
