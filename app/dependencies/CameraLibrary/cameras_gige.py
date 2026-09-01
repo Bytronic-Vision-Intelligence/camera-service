@@ -23,13 +23,44 @@ CTI_CANDIDATES = [
 
 
 def _genicam_enum_value(value: str) -> str:
-    """Map config strings like ``strobe`` to GenICam symbols like ``Strobe``."""
+    """Normalize config strings to GenICam PascalCase symbols."""
     s = str(value).strip()
     if not s:
         return s
     if s.islower() or s.isupper():
         return s.capitalize()
     return s
+
+
+# Config aliases for features whose user-facing names differ from GenICam symbols.
+_GENICAM_ENUM_ALIASES = {
+    "LineMode": {
+        "strobe": "Output",
+        "output": "Output",
+        "input": "Input",
+    },
+}
+
+
+def _set_genicam_enum(node, feature_name: str, value: str) -> str:
+    """Set a GenICam enum node, resolving config aliases against valid symbols."""
+    desired = str(value).strip()
+    aliases = _GENICAM_ENUM_ALIASES.get(feature_name, {})
+    resolved = aliases.get(desired.lower(), _genicam_enum_value(desired))
+
+    symbolics = [str(s) for s in getattr(node, "symbolics", [])]
+    if symbolics:
+        for candidate in (resolved, desired, _genicam_enum_value(desired)):
+            for symbolic in symbolics:
+                if symbolic == candidate or symbolic.lower() == candidate.lower():
+                    node.value = symbolic
+                    return symbolic
+        raise ValueError(
+            f"{feature_name}: no match for {value!r} (resolved={resolved!r}, valid={symbolics})"
+        )
+
+    node.value = resolved
+    return resolved
 
 
 def _line_selector_name(line) -> str:
@@ -154,15 +185,19 @@ class GigeCamera(Camera):
             return
 
         line_selector = _line_selector_name(line)
-        line_mode = _genicam_enum_value(str(cfg.get("line_mode") or "strobe"))
-        line_source = _genicam_enum_value(str(cfg.get("line_source") or "ExposureActive"))
+        line_mode_cfg = str(cfg.get("line_mode") or "strobe")
+        line_source_cfg = str(cfg.get("line_source") or "ExposureActive")
 
         nm = camera.remote_device.node_map
         try:
             nm.LineSelector.value = line_selector
-            nm.LineMode.value = line_mode
+            line_mode = _set_genicam_enum(nm.LineMode, "LineMode", line_mode_cfg)
             if line_mode.lower() != "input":
-                nm.LineSource.value = line_source
+                line_source = _set_genicam_enum(
+                    nm.LineSource, "LineSource", line_source_cfg
+                )
+            else:
+                line_source = line_source_cfg
         except Exception as e:
             raise RuntimeError(
                 f"Failed configuring lights (line={line_selector}, "
