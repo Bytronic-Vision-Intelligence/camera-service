@@ -17,3 +17,7 @@ PyYAML==6.0.3
 # listed here because there is no Linux build; install it by hand on FLIR
 # machines. cameras_flir.py is imported lazily, so other camera types are
 # unaffected.
+
+# Caps every test (pytest.ini: timeout). A blocking test otherwise runs the
+# CI job to GitHub's 6-hour limit instead of failing.
+pytest-timeout==2.4.0
