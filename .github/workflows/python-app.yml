@@ -47,6 +47,21 @@ jobs:
           pip install flake8 pytest
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
+      - name: Guard against case-only rename drift
+        run: |
+          # macOS and Windows are case-insensitive, so a file can stay tracked
+          # as Test_foo.py while the working tree shows test_foo.py. A Linux
+          # runner then checks out the capitalised name, which pytest's default
+          # test_*.py pattern does not collect - the suite silently shrinks and
+          # CI still reports success.
+          stray=$(git ls-files | grep -E '(^|/)Test_[^/]*\.py$' || true)
+          if [ -n "$stray" ]; then
+            echo "::error::These test files are tracked with capitalised names and will not be collected:"
+            echo "$stray"
+            exit 1
+          fi
+          echo "No capitalised test files tracked."
+
       - name: Lint with flake8
         run: |
           # stop the build if there are Python syntax errors or undefined names
