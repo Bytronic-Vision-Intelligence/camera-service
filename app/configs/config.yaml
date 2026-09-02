@@ -1,8 +1,9 @@
 mqtt:
   ip: localhost
   port: 1883
-  trigger_topic: dunbia_seal/camera/colour/trigger
-  image_topic: dunbia_seal/camera/colour/image
+  qos: 1
+  trigger_topic: project/camera/{camera_id}/trigger
+  image_topic: project/camera/{camera_id}/image
 camera:
   camera_type: opencv
   camera_id: colour
