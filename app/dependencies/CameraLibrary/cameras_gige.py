@@ -14,9 +14,8 @@ CTI_CANDIDATES = [
     Path(os.environ["GIGE_CTI"]) if os.environ.get("GIGE_CTI") else None,
     Path("/opt/baumer-gapi-sdk-cpp/lib/libbgapi2_gige.cti"),
     Path("/opt/baumer-gapi-sdk-cpp/lib/libbgapi2_usb.cti"),
-
     Path(r"C:\Program Files (x86)\Optotune AG\Optotune cockpit\Resources\GenICamCtiFiles\bgapi2_gige.cti"),
-    Path(r"C:\Users\Dunbia-L4\Desktop\pc_setup\Baumer_GAPI_SDK_2.16.1_win_x86_64_c\Baumer_GAPI_SDK_2.16.1_win_x86_64_c\bin\bgapi2_gige.cti"),
+    Path(r"C:\Program Files\Baumer\Baumer GAPI SDK\bin\bgapi2_gige.cti"),
     Path(r"C:\Program Files\Lucid Vision Labs\Arena SDK\x64Release\GenTL_LUCID_v140.cti"),
     Path(r"C:\Program Files\Basler\pylon 7\Runtime\x64\ProducerGEV.cti"),
 ]
@@ -124,7 +123,7 @@ class GigeCamera(Camera):
         self._lights_line_source: str | None = None
 
     def _find_camera(self):
-        """Open by ``camera.serial_number`` when set; otherwise first available device."""
+        """Open by ``camera.serial_number``; fail if not set or not found."""
         self.cam = None
         self.harvester = None
 
@@ -133,9 +132,14 @@ class GigeCamera(Camera):
         except Exception:
             serial = ""
 
+        if not serial:
+            raise RuntimeError(
+                "GigE camera not specified. Set camera.serial_number in config."
+            )
+
         try:
             try:
-                configured = str(loadConfig.return_config_value("camera.gentl_cti") or "").strip()
+                configured = str(loadConfig.return_config_value("camera.cti_path") or "").strip()
             except Exception:
                 configured = ""
 
@@ -146,7 +150,7 @@ class GigeCamera(Camera):
             cti = next((p for p in cti_candidates if p.is_file()), None)
             if cti is None:
                 raise RuntimeError(
-                    "No GenTL .cti found. Set camera.gentl_cti or GIGE_CTI "
+                    "No GenTL .cti found. Set camera.cti_path or GIGE_CTI "
                     "(Baumer bgapi2_gige.cti recommended)."
                 )
 
@@ -158,30 +162,27 @@ class GigeCamera(Camera):
                 h.reset()
                 raise RuntimeError("No GigE cameras detected")
 
-            index = 0
-            if serial:
-                matched = None
-                for i, info in enumerate(devices):
-                    if str(info.property_dict.get("serial_number") or "") == serial:
-                        matched = i
-                        break
-                if matched is None:
-                    available = [d.property_dict.get("serial_number") for d in devices]
-                    h.reset()
-                    raise RuntimeError(
-                        f"GigE camera with serial_number={serial} not found "
-                        f"(detected={available})"
-                    )
-                index = matched
+            matched = None
+            for i, info in enumerate(devices):
+                if str(info.property_dict.get("serial_number") or "") == serial:
+                    matched = i
+                    break
+            if matched is None:
+                available = [d.property_dict.get("serial_number") for d in devices]
+                h.reset()
+                raise RuntimeError(
+                    f"GigE camera with serial_number={serial} not found "
+                    f"(detected={available})"
+                )
 
-            props = devices[index].property_dict
+            props = devices[matched].property_dict
             logging.info(
                 "Camera found: %s (serial=%s)",
                 props.get("model"),
                 props.get("serial_number"),
             )
 
-            cam = h.create(index)
+            cam = h.create(matched)
             self.harvester = h
             self.cam = cam
             return cam
