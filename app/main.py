@@ -30,7 +30,7 @@ def require(config: dict, key: str):
         SystemExit: when `key` is absent, naming both the key and the file.
     """
     if key not in config:
-        raise SystemExit(f"Missing required config key '{key}' in {loadConfig.config_path()}")
+        raise SystemExit(f"Missing required config key '{key}' in {loadConfig._CONFIG_PATH}")
     return config[key]
 
 
@@ -80,9 +80,11 @@ def main(config_path: str | None = None) -> int:
     loadConfig.set_config_path(config_path)
     mqtt_config = loadConfig.return_config_value("mqtt")
     camera_config = loadConfig.return_config_value("camera")
+    trigger_config = loadConfig.return_config_value("trigger")
+    lights_config = loadConfig.return_config_value("lights")
     archive_config = loadConfig.return_config_value("archiving")
 
-    logging_file = f'./logs/{require(camera_config, "camera_type")}_worker{time.strftime("%Y%m%d")}.log'
+    logging_file = f'./logs/{require(camera_config, "camera_id")}_{require(camera_config, "camera_type")}_service_{time.strftime("%Y%m%d")}.log'
 
     os.makedirs(os.path.dirname(logging_file), exist_ok=True)
     if not os.path.exists(logging_file):
@@ -116,7 +118,7 @@ def main(config_path: str | None = None) -> int:
 
     # GigE: hardware | software | continuous. LJS/others: external | internal.
     # internal/software → MQTT + capture_image; external/hardware → frame thread.
-    _trigger = str(require(camera_config, "trigger_type")).strip().lower()
+    _trigger = str(require(trigger_config, "trigger_type")).strip().lower()
     is_external_trigger = _trigger in ("external", "hardware")
 
     if not is_external_trigger:
@@ -161,7 +163,7 @@ def main(config_path: str | None = None) -> int:
             logging.info("Capturing image...")
             if not is_external_trigger:
                 try:
-                    image = camera.capture_image(timeout_ms=require(camera_config, "capture_timout"))
+                    image = camera.capture_image(timeout_ms=require(camera_config, "capture_timeout"))
                 except Exception as e:
                     logging.error("Capture failed; skipping trigger: %s", e, exc_info=True)
                     continue
@@ -177,8 +179,8 @@ def main(config_path: str | None = None) -> int:
             
             if require(archive_config, "is_archived"):
                 timestamp = time.strftime("%Y%m%d_%H%M%S")
-                archive_filename = f"cam{require(camera_config, 'camera_id') or '0'}_{require(camera_config, 'camera_type')}_{timestamp}"
-                archive_image(image, require(archive_config, "archive_directory"), archive_filename, require(archive_config, "archive_params"), require(camera_config, "camera_id"))
+                archive_filename = f"cam_{require(camera_config, 'camera_id') or '0'}_{require(camera_config, 'camera_type')}_{timestamp}"
+                archive_image(image, require(archive_config, "archive_directory"), archive_filename, require(archive_config, "archive_parameters"), require(camera_config, "camera_id"))
 
             image_bytes = encode_image_to_bytes(image)
             packet = {}
@@ -219,12 +221,24 @@ def main(config_path: str | None = None) -> int:
     return exit_code
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Camera worker")
+    parser = argparse.ArgumentParser(description="Camera service")
     parser.add_argument(
         "--config",
         type=str,
         default=None,
-        help="Path to YAML config file (defaults to app/dependencies/config.yaml)",
+        help="Path to YAML config file",
+    )
+    parser.add_argument(
+        "--test",
+        action="store_true",
+        help="Use fallback config (app/configs/config.yaml)",
     )
     args = parser.parse_args()
-    raise SystemExit(main(config_path=args.config))
+
+    if args.test and args.config:
+        parser.error("cannot use both --test and --config")
+    if not args.test and not args.config:
+        parser.error("one of --config or --test is required")
+
+    config_path = None if args.test else args.config
+    raise SystemExit(main(config_path=config_path))
