@@ -315,6 +315,7 @@ class GigeCamera(Camera):
                     continue
 
             self._apply_camera_settings(self.cam)
+            self._apply_lights_settings(self.cam)
 
             # GigE trigger_type:
             #   hardware    → line trigger (frame thread)

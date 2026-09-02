@@ -6,17 +6,18 @@ trigger_time_topic: "test/image/trigger_time"
 message: null
 
 camera:
-  camera_type: opencv
-
-camera_settings:
+  camera_type: dummy
+  camera_id: "0001"
   pixel_format: BayerRG8
-trigger:
   trigger_type: software
+  dummy_location: "C:/Users/AmyHarrison/camera_worker/camera-worker/test/"
+  file_type: ".png"
+  capture_timout: 10
 
 archiving:
-  is_archived: "true"
+  is_archived: True
   archive_directory: "save_dir"
-  archive_parameters:
+  archive_params:
     archive_freq: "daily"
     archive_storage: 50 # GB
     archive_days: 30 # days

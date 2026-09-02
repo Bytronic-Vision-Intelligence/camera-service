@@ -18,62 +18,31 @@ from dependencies.data_functions import encode_date_time_to_bytes, encode_image_
 from dependencies.archive_functions import archive_image
 from mqtt_client import MQTTClient, MQTTConfig
 
-def load_runtime_config(config_path: str | None = None) -> dict:
-    if config_path:
-        loadConfig.set_config_path(config_path)
+def require(config: dict, key: str):
+    """Return a required top-level config value, or exit describing what is missing.
 
-    ip = loadConfig.return_config_value("ip")
-    port = loadConfig.return_config_value("port")
-    trigger_topic = loadConfig.return_config_value("trigger_topic")
-    trigger_time_topic = loadConfig.return_config_value("trigger_time_topic")
-    message = loadConfig.return_config_value("message")
+    Args:
+        config: the loaded configuration mapping.
+        key: the top-level key the service cannot start without.
+    Returns:
+        the value stored under `key`.
+    Raises:
+        SystemExit: when `key` is absent, naming both the key and the file.
+    """
+    if key not in config:
+        raise SystemExit(f"Missing required config key '{key}' in {loadConfig._CONFIG_PATH}")
+    return config[key]
 
-    camera_type = loadConfig.return_config_value("camera.camera_type")
-    # Logical id for MQTT topics / archiving (ui_worker listens on camera_{id}).
-    # Distinct from camera.serial_number, which selects the hardware device.
-    try:
-        camera_id = loadConfig.return_config_value("camera.camera_id")
-    except KeyError:
-        camera_id = None
-    if camera_id is not None:
-        camera_id = str(camera_id).strip() or None
 
-    image_topic = loadConfig.return_config_value("image_topic")
-    if camera_id:
-        image_topic = image_topic.replace("/camera/", f"/camera_{camera_id}/")
-    trigger_type = loadConfig.return_config_value("trigger.trigger_type")
-
-    archive_directory = Path(loadConfig.return_config_value("archiving.archive_directory"))
-    logging_file = f'./logs/{camera_type}_worker{time.strftime("%Y%m%d")}.log'
-    buffer_size = loadConfig.get_section("camera_settings").get("buffer_size")
-    capture_timeout_ms = int(loadConfig.get_section("camera_settings").get("capture_timeout_ms", 1000))
-    is_archived = str(loadConfig.return_config_value("archiving.is_archived")).lower() == "true"
-    archive_params = loadConfig.return_config_value("archiving.archive_parameters")
-
-    return {
-        "ip": ip,
-        "port": port,
-        "trigger_topic": trigger_topic,
-        "trigger_time_topic": trigger_time_topic,
-        "message": message,
-        "camera_type": camera_type,
-        "camera_id": camera_id,
-        "image_topic": image_topic,
-        "trigger_type": trigger_type,
-        "archive_directory": archive_directory,
-        "logging_file": logging_file,
-        "buffer_size": buffer_size,
-        "capture_timeout_ms": capture_timeout_ms,
-        "is_archived": is_archived,
-        "archive_params": archive_params,
-    }
-
-def set_camera_class(camera_type: str):
+def set_camera_class(camera_type: str, config:dict):
     if not camera_type:
         raise ValueError("Camera type cannot be empty.")
     
     if camera_type == "opencv":
         camera = Camera()
+    elif camera_type == "dummy":
+        from dependencies.CameraLibrary.cameras_dummy import DummyCamera
+        camera = DummyCamera(require(config, "dummy_location"), require(config, "file_type"))
     elif camera_type == "pylon":
         from dependencies.CameraLibrary.cameras_pylon import PylonCamera
         camera = PylonCamera()
@@ -108,19 +77,14 @@ def start_frame_thread(
     return thread
 
 def main(config_path: str | None = None) -> int:
-    cfg = load_runtime_config(config_path)
-    ip = cfg["ip"]
-    port = cfg["port"]
-    trigger_topic = cfg["trigger_topic"]
-    camera_type = cfg["camera_type"]
-    camera_id = cfg["camera_id"]
-    image_topic = cfg["image_topic"]
-    trigger_type = cfg["trigger_type"]
-    archive_directory = cfg["archive_directory"]
-    logging_file = cfg["logging_file"]
-    capture_timeout_ms = cfg["capture_timeout_ms"]
-    is_archived = cfg["is_archived"]
-    archive_params = cfg["archive_params"]
+    loadConfig.set_config_path(config_path)
+    mqtt_config = loadConfig.return_config_value("mqtt")
+    camera_config = loadConfig.return_config_value("camera")
+    trigger_config = loadConfig.return_config_value("trigger")
+    lights_config = loadConfig.return_config_value("lights")
+    archive_config = loadConfig.return_config_value("archiving")
+
+    logging_file = f'./logs/{require(camera_config, "camera_id")}_{require(camera_config, "camera_type")}_service_{time.strftime("%Y%m%d")}.log'
 
     os.makedirs(os.path.dirname(logging_file), exist_ok=True)
     if not os.path.exists(logging_file):
@@ -135,9 +99,8 @@ def main(config_path: str | None = None) -> int:
         filemode='a'
     )
 
-    camera = set_camera_class(camera_type)
-
-    config = MQTTConfig(host=ip, port=port)
+    camera = set_camera_class(require(camera_config, "camera_type"), camera_config)
+    config = MQTTConfig(host=require(mqtt_config, "ip"), port=require(mqtt_config, "port"))
     client = MQTTClient(config)
     client.connect()
 
@@ -155,14 +118,14 @@ def main(config_path: str | None = None) -> int:
 
     # GigE: hardware | software | continuous. LJS/others: external | internal.
     # internal/software → MQTT + capture_image; external/hardware → frame thread.
-    _trigger = str(trigger_type).strip().lower()
+    _trigger = str(require(trigger_config, "trigger_type")).strip().lower()
     is_external_trigger = _trigger in ("external", "hardware")
 
     if not is_external_trigger:
         subscribe_thread = start_subscribe_thread(
-            ip,
-            port,
-            trigger_topic,
+            require(mqtt_config, "ip"),
+            require(mqtt_config, "port"),
+            require(mqtt_config, "trigger_topic"),
             event_queue,
             stop_event,
         )
@@ -178,18 +141,20 @@ def main(config_path: str | None = None) -> int:
         while not stop_event.is_set():
             
             try:
-                msg = event_queue.get(timeout = 1.0)
+                message = event_queue.get(timeout = 1.0)
+                if not "trigger" in message:
+                    continue
                 start_time = time.time()
             except Empty:
                 continue
 
-            if isinstance(msg, CameraLossError):
-                logging.critical("CAMERA LOSS: %s", msg)
-                print(f"CAMERA LOSS: {msg}", flush=True)
+            if isinstance(message, CameraLossError):
+                logging.critical("CAMERA LOSS: %s", message)
+                print(f"CAMERA LOSS: {message}", flush=True)
                 exit_code = 1
                 break
 
-            if msg is None:
+            if message is None:
                 logging.info("Received invalid trigger payload; ignoring.")
                 continue
 
@@ -198,24 +163,24 @@ def main(config_path: str | None = None) -> int:
             logging.info("Capturing image...")
             if not is_external_trigger:
                 try:
-                    image = camera.capture_image(timeout_ms=capture_timeout_ms)
+                    image = camera.capture_image(timeout_ms=require(camera_config, "capture_timeout"))
                 except Exception as e:
                     logging.error("Capture failed; skipping trigger: %s", e, exc_info=True)
                     continue
             else:
-                if not isinstance(msg, np.ndarray):
-                    logging.error("Expected image frame from queue, got %s", type(msg))
+                if not isinstance(message, np.ndarray):
+                    logging.error("Expected image frame from queue, got %s", type(message))
                     continue
-                image = msg
+                image = message
 
             if image is None:
                 logging.error("No image available to encode.")
                 continue
             
-            if is_archived:
+            if require(archive_config, "is_archived"):
                 timestamp = time.strftime("%Y%m%d_%H%M%S")
-                archive_filename = f"cam{camera_id or '0'}_{camera_type}_{timestamp}"
-                archive_image(image, archive_directory, archive_filename, archive_params, camera_id)
+                archive_filename = f"cam{require(camera_config, 'camera_id') or '0'}_{require(camera_config, 'camera_type')}_{timestamp}"
+                archive_image(image, require(archive_config, "archive_directory"), archive_filename, require(archive_config, "archive_parameters"), require(camera_config, "camera_id"))
 
             image_bytes = encode_image_to_bytes(image)
             packet = {}
@@ -226,7 +191,7 @@ def main(config_path: str | None = None) -> int:
 
             if image is not None:
                 try:
-                    client.publish(image_topic, packet)
+                    client.publish(require(mqtt_config, "image_topic"), packet)
                 except Exception as e:
                     logging.error("Error publishing image: %s", e)
             else:
@@ -256,12 +221,24 @@ def main(config_path: str | None = None) -> int:
     return exit_code
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Camera worker")
+    parser = argparse.ArgumentParser(description="Camera service")
     parser.add_argument(
         "--config",
         type=str,
         default=None,
-        help="Path to YAML config file (defaults to app/dependencies/config.yaml)",
+        help="Path to YAML config file",
+    )
+    parser.add_argument(
+        "--test",
+        action="store_true",
+        help="Use fallback config (app/configs/config.yaml)",
     )
     args = parser.parse_args()
-    raise SystemExit(main(config_path=args.config))
+
+    if args.test and args.config:
+        parser.error("cannot use both --test and --config")
+    if not args.test and not args.config:
+        parser.error("one of --config or --test is required")
+
+    config_path = None if args.test else args.config
+    raise SystemExit(main(config_path=config_path))
