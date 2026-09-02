@@ -18,6 +18,13 @@ RUN curl -fsSL https://raw.githubusercontent.com/nektos/act/master/install.sh \
       | bash -s -- -b /usr/local/bin \
     && act --version
 
+# yq lets the entrypoint read the matrix out of the workflow itself, so a local
+# run tracks whatever the remote CI actually runs instead of a hardcoded list.
+RUN curl -fsSL -o /usr/local/bin/yq \
+      "https://github.com/mikefarah/yq/releases/latest/download/yq_linux_$(dpkg --print-architecture)" \
+    && chmod +x /usr/local/bin/yq \
+    && yq --version
+
 COPY entrypoint.sh /usr/local/bin/entrypoint
 RUN chmod +x /usr/local/bin/entrypoint
 

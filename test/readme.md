@@ -12,7 +12,7 @@ is required — nothing here touches hardware.
 
 ## What is covered
 
-- `data_functions` — mono `HxWx1` squeeze, Mono16 normalisation to 8-bit
+- `image_functions` — mono `HxWx1` squeeze, Mono16 normalisation to 8-bit
   (truncating instead of scaling would render images black), the JPEG
   encode/decode round trip, and the guards on empty or malformed input
 - `loadConfig` — `set_config_path` (the hook service-orchestrator drives via
