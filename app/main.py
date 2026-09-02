@@ -14,7 +14,7 @@ from dependencies import loadConfig
 from dependencies.CameraLibrary.cameras import Camera
 from dependencies.CameraLibrary.hardware_trigger import CameraLossError
 from dependencies.mqtt_functions import start_subscribe_thread
-from dependencies.data_functions import encode_date_time_to_bytes, encode_image_to_bytes
+from dependencies.image_functions import encode_date_time_to_bytes, encode_image_to_bytes, apply_image_settings
 from dependencies.archive_functions import archive_image
 from mqtt_client import MQTTClient, MQTTConfig
 
@@ -82,6 +82,7 @@ def main(config_path: str | None = None) -> int:
     camera_config = loadConfig.return_config_value("camera")
     trigger_config = loadConfig.return_config_value("trigger")
     lights_config = loadConfig.return_config_value("lights")
+    image_config = loadConfig.return_config_value("image")
     archive_config = loadConfig.return_config_value("archiving")
 
     logging_file = f'./logs/{require(camera_config, "camera_id")}_{require(camera_config, "camera_type")}_service_{time.strftime("%Y%m%d")}.log'
@@ -171,6 +172,7 @@ def main(config_path: str | None = None) -> int:
                 if not isinstance(message, np.ndarray):
                     logging.error("Expected image frame from queue, got %s", type(message))
                     continue
+                image = apply_image_settings(image, image_config)
                 image = message
 
             if image is None:
