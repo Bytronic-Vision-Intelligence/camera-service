@@ -1,0 +1,21 @@
+mqtt:
+  ip: localhost
+  port: 1883
+  qos: 1
+  trigger_topic: project/camera/{camera_id}/trigger
+  image_topic: project/camera/{camera_id}/image
+camera:
+  camera_type: opencv
+  camera_id: colour
+  capture_timeout: 10
+trigger:
+  trigger_type: software
+lights: null
+image: null
+archiving:
+  is_archived: 'true'
+  archive_directory: ../data
+  archive_parameters:
+    archive_freq: daily
+    archive_storage: 50
+    archive_days: 30
