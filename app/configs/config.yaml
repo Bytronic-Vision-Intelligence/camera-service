@@ -11,6 +11,7 @@ camera:
 trigger:
   trigger_type: software
 lights: null
+image: null
 archiving:
   is_archived: 'true'
   archive_directory: ../data

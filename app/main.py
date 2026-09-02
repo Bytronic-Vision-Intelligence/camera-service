@@ -172,12 +172,14 @@ def main(config_path: str | None = None) -> int:
                 if not isinstance(message, np.ndarray):
                     logging.error("Expected image frame from queue, got %s", type(message))
                     continue
-                image = apply_image_settings(image, image_config)
                 image = message
 
             if image is None:
                 logging.error("No image available to encode.")
                 continue
+
+            if image_config:
+                image = apply_image_settings(image, image_config)
             
             if require(archive_config, "is_archived"):
                 timestamp = time.strftime("%Y%m%d_%H%M%S")
