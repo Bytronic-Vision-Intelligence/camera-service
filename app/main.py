@@ -14,7 +14,14 @@ from dependencies import loadConfig
 from dependencies.CameraLibrary.cameras import Camera
 from dependencies.CameraLibrary.hardware_trigger import CameraLossError
 from dependencies.mqtt_functions import start_subscribe_thread
-from dependencies.image_functions import encode_date_time_to_bytes, encode_image_to_bytes, apply_image_settings
+from dependencies.image_functions import (
+    apply_image_format,
+    build_image_topic,
+    encode_date_time_to_bytes,
+    encode_image_to_bytes,
+    image_encoding,
+    resolve_image_outputs,
+)
 from dependencies.archive_functions import archive_image
 from mqtt_client import MQTTClient, MQTTConfig
 
@@ -78,12 +85,13 @@ def start_frame_thread(
 
 def main(config_path: str | None = None) -> int:
     loadConfig.set_config_path(config_path)
+    service_config = loadConfig.get_config()
     mqtt_config = loadConfig.return_config_value("mqtt")
     camera_config = loadConfig.return_config_value("camera")
     trigger_config = loadConfig.return_config_value("trigger")
-    lights_config = loadConfig.return_config_value("lights")
-    image_config = loadConfig.return_config_value("image")
     archive_config = loadConfig.return_config_value("archiving")
+    image_outputs = resolve_image_outputs(service_config)
+    base_image_topic = require(mqtt_config, "image_topic")
 
     logging_file = f'./logs/{require(camera_config, "camera_id")}_{require(camera_config, "camera_type")}_service_{time.strftime("%Y%m%d")}.log'
 
@@ -178,28 +186,59 @@ def main(config_path: str | None = None) -> int:
                 logging.error("No image available to encode.")
                 continue
 
-            if image_config:
-                image = apply_image_settings(image, image_config)
-            
-            if require(archive_config, "is_archived"):
-                timestamp = time.strftime("%Y%m%d_%H%M%S")
-                archive_filename = f"cam_{require(camera_config, 'camera_id') or '0'}_{require(camera_config, 'camera_type')}_{timestamp}"
-                archive_image(image, require(archive_config, "archive_directory"), archive_filename, require(archive_config, "archive_parameters"), require(camera_config, "camera_id"))
-
-            image_bytes = encode_image_to_bytes(image)
-            packet = {}
-            packet["image"] = base64.b64encode(image_bytes).decode("ascii")
-            packet["date_time"] = date_time.decode("utf-8")
-
-            logging.info(f"Publishing image... of size {getsizeof(image_bytes)}")
-
-            if image is not None:
+            timestamp = time.strftime("%Y%m%d_%H%M%S")
+            for output in image_outputs:
                 try:
-                    client.publish(require(mqtt_config, "image_topic"), packet)
+                    variant = apply_image_format(image, output["image_format"])
                 except Exception as e:
-                    logging.error("Error publishing image: %s", e)
-            else:
-                logging.info("Failed to capture image.")
+                    logging.error(
+                        "Failed to apply image_format for image %s: %s",
+                        output["id"],
+                        e,
+                        exc_info=True,
+                    )
+                    continue
+
+                topic = build_image_topic(base_image_topic, output["topic_end"])
+
+                if require(archive_config, "is_archived") and output["archive"]:
+                    archive_filename = (
+                        f"cam_{require(camera_config, 'camera_id') or '0'}_"
+                        f"{require(camera_config, 'camera_type')}_"
+                        f"{output['id']}_{timestamp}"
+                    )
+                    archive_image(
+                        variant,
+                        require(archive_config, "archive_directory"),
+                        archive_filename,
+                        require(archive_config, "archive_parameters"),
+                        require(camera_config, "camera_id"),
+                    )
+
+                image_bytes = encode_image_to_bytes(variant)
+                packet = {
+                    "image": base64.b64encode(image_bytes).decode("ascii"),
+                    "date_time": date_time.decode("utf-8"),
+                    "image_id": output["id"],
+                    "encoding": image_encoding(variant),
+                }
+
+                logging.info(
+                    "Publishing image %s to %s (size %s)",
+                    output["id"],
+                    topic,
+                    getsizeof(image_bytes),
+                )
+
+                try:
+                    client.publish(topic, packet)
+                except Exception as e:
+                    logging.error(
+                        "Error publishing image %s to %s: %s",
+                        output["id"],
+                        topic,
+                        e,
+                    )
 
             print(f"imaging took a total of {time.time()-start_time}")
             logging.info("Image published. Waiting for next capture request...")

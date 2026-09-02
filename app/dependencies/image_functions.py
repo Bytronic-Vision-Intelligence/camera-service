@@ -1,34 +1,45 @@
-from numpy import frombuffer, ndarray, uint8
+import numpy as np
 import cv2
 from time import localtime, strftime
 
 
-def prepare_image_for_jpeg(image: ndarray) -> ndarray:
+def prepare_image_for_jpeg(image: np.ndarray) -> np.ndarray:
     """Return an 8-bit image suitable for JPEG (keeps mono HxW raw layout)."""
     if image is None:
         raise ValueError("Input image is None.")
-    if not isinstance(image, ndarray):
+    if not isinstance(image, np.ndarray):
         raise ValueError("Input image must be a numpy array.")
 
     img = image
     if img.ndim == 3 and img.shape[2] == 1:
         img = img[:, :, 0]
 
-    if img.dtype != uint8:
+    if img.dtype != np.uint8:
         # Mono16 / float etc. → uint8 without expanding to BGR
         img = cv2.normalize(img, None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U)
     return img
 
 
-def encode_image_to_bytes(image: ndarray) -> bytes:
-    """Encode the image as JPEG and return the bytes."""
+def encode_image_to_bytes(image: np.ndarray) -> bytes:
+    """Encode the image as JPEG (8-bit) or PNG (uint16)."""
+    if image.dtype == np.uint16:
+        success, encoded_image = cv2.imencode(".png", image)
+        if not success:
+            raise RuntimeError("Failed to encode image to PNG format.")
+        return encoded_image.tobytes()
+
     img = prepare_image_for_jpeg(image)
-
     success, encoded_image = cv2.imencode(".jpg", img)
-
     if not success:
         raise RuntimeError("Failed to encode image to JPEG format.")
     return encoded_image.tobytes()
+
+
+def image_encoding(image: np.ndarray) -> str:
+    """Return the on-wire encoding used by :func:`encode_image_to_bytes`."""
+    if isinstance(image, np.ndarray) and image.dtype == np.uint16:
+        return "png"
+    return "jpeg"
 
 
 def encode_date_time_to_bytes() -> bytes:
@@ -36,26 +47,166 @@ def encode_date_time_to_bytes() -> bytes:
     date_time = strftime("%Y-%m-%d %H:%M:%S", localtime())
     return date_time.encode("utf-8")
 
-def decode_image_from_bytes(data: bytes) -> ndarray:
-    '''decodes an image stored in bytes into an ndarray
-    Args:
-        data: a byte string representing the image
-    Returns:
-        image: an ndarray representing the image
-    '''
+
+def decode_image_from_bytes(data: bytes) -> np.ndarray:
+    """Decode an image stored in bytes into an ndarray."""
     if not data:
         raise ValueError("Empty image bytes.")
 
-    image = cv2.imdecode(frombuffer(data, uint8), cv2.IMREAD_UNCHANGED)
+    image = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_UNCHANGED)
     if image is None:
         raise ValueError("Could not decode image bytes.")
     return image
 
 
-def apply_image_settings(image, image_config):
-    colour_format = image_config.get("colour_format", None)
-    if colour_format:
-        if colour_format == "bgr_2_rgb":
-            image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-    return image
-        
+def _color_conversion_code(name: str) -> int:
+    attr = f"COLOR_{str(name).strip()}"
+    if hasattr(cv2, attr):
+        return getattr(cv2, attr)
+    raise ValueError(f"Unsupported channel conversion: {name!r}")
+
+
+def _colormap_code(name: str) -> int:
+    attr = str(name).strip()
+    if not attr.startswith("COLORMAP_"):
+        attr = f"COLORMAP_{attr}"
+    if hasattr(cv2, attr):
+        return getattr(cv2, attr)
+    raise ValueError(f"Unsupported colourmap: {name!r}")
+
+
+def _to_grayscale_uint8(image: np.ndarray) -> np.ndarray:
+    """Collapse to single-channel uint8."""
+    img = image
+    if img.ndim == 3:
+        if img.shape[2] == 1:
+            img = img[:, :, 0]
+        else:
+            img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    if img.dtype != np.uint8:
+        img = cv2.normalize(img, None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U)
+    return img
+
+
+def _bit_mask(bits: int) -> int:
+    if bits < 1 or bits > 16:
+        raise ValueError(f"uint16 bit depth must be 1-16 (got {bits})")
+    return (1 << bits) - 1
+
+
+def _to_uint16(image: np.ndarray, bits: int | None = None) -> np.ndarray:
+    """Return a 2D uint16 mono image, optionally masked to ``bits``."""
+    img = image
+    if img.ndim == 3:
+        if img.shape[2] == 1:
+            img = img[:, :, 0]
+        else:
+            img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+
+    max_value = _bit_mask(bits) if bits is not None else 65535
+
+    if img.dtype == np.uint16:
+        out = img
+    elif img.dtype == np.uint8:
+        out = img.astype(np.uint16)
+    elif img.dtype.kind == "f":
+        out = img.clip(0, max_value).round().astype(np.uint16)
+    else:
+        out = img.clip(0, max_value).astype(np.uint16)
+
+    if bits is not None:
+        out = np.bitwise_and(out, np.uint16(max_value))
+    return out
+
+
+def _apply_mono_format(image: np.ndarray, name: str) -> np.ndarray:
+    """Convert to MonoN / uint16 / uint8."""
+    lower = name.lower()
+
+    if lower == "uint8":
+        return _to_grayscale_uint8(image)
+    if lower == "uint16":
+        return _to_uint16(image)
+    if lower.startswith("mono"):
+        depth = int(name[4:])
+        return _to_uint16(image, depth)
+
+    raise ValueError(f"Unsupported mono image_format: {name!r}")
+
+
+def apply_image_format(image: np.ndarray, image_format) -> np.ndarray:
+    """Apply a single ``images.*.image_format`` transform. ``None`` keeps the frame raw."""
+    if image_format is None:
+        return image
+
+    if isinstance(image_format, str):
+        return _apply_mono_format(image, image_format.strip())
+
+    if not isinstance(image_format, dict):
+        raise ValueError("image_format must be a string, mapping, or null")
+
+    if "channel" in image_format:
+        if image.ndim < 3 or image.shape[2] < 3:
+            raise ValueError(
+                f"channel {image_format['channel']!r} requires a 3-channel image"
+            )
+        return cv2.cvtColor(image, _color_conversion_code(image_format["channel"]))
+
+    if "colourmap" in image_format:
+        return cv2.applyColorMap(
+            _to_grayscale_uint8(image),
+            _colormap_code(image_format["colourmap"]),
+        )
+
+    raise ValueError(f"Unsupported image_format: {image_format!r}")
+
+
+def build_image_topic(base_topic: str, topic_end: str | None) -> str:
+    """Append ``topic_end`` to the mqtt ``image_topic`` base when set."""
+    base = str(base_topic).rstrip("/")
+    if topic_end is None:
+        return base
+    suffix = str(topic_end).strip().strip("/")
+    if not suffix:
+        return base
+    return f"{base}/{suffix}"
+
+
+def parse_image_outputs(images_config) -> list[dict]:
+    """Parse ``images`` config into normalised output descriptors."""
+    if not isinstance(images_config, list) or not images_config:
+        raise ValueError("images must be a non-empty list")
+
+    outputs: list[dict] = []
+    for entry in images_config:
+        if not isinstance(entry, dict) or len(entry) != 1:
+            raise ValueError(
+                f"Each images entry must be a single-key dict: {entry!r}"
+            )
+        image_id, spec = next(iter(entry.items()))
+        if not isinstance(spec, dict):
+            raise ValueError(f"Image spec for {image_id!r} must be a mapping")
+
+        outputs.append(
+            {
+                "id": str(image_id),
+                "image_format": spec.get("image_format"),
+                "topic_end": spec.get("topic_end"),
+                "archive": bool(spec.get("archive", False)),
+            }
+        )
+    return outputs
+
+
+def resolve_image_outputs(config: dict) -> list[dict]:
+    """Return configured image outputs, or a single passthrough default."""
+    if "images" in config:
+        return parse_image_outputs(config["images"])
+    return [
+        {
+            "id": "default",
+            "image_format": None,
+            "topic_end": None,
+            "archive": True,
+        }
+    ]
