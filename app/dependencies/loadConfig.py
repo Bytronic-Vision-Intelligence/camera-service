@@ -5,33 +5,26 @@ from typing import Any
 
 import yaml
 
-_CONFIG_PATH_OVERRIDE: Path | None = None
-
-
-def _config_path() -> Path:
-    if _CONFIG_PATH_OVERRIDE is not None:
-        return _CONFIG_PATH_OVERRIDE
-    return Path(__file__).resolve().parent / "config.yaml"
+_DEFAULT_CONFIG_PATH = Path(__file__).resolve().parent.parent / "configs" / "config.yaml"
+_CONFIG_PATH: Path | None = None
 
 
 def set_config_path(path: str | Path | None) -> None:
-    """Override the config file path for this process."""
-    global _CONFIG_PATH_OVERRIDE
-    if path is None:
-        _CONFIG_PATH_OVERRIDE = None
-        return
-    _CONFIG_PATH_OVERRIDE = Path(path).resolve()
+    """Set the config file path for this process. None selects the default fallback."""
+    global _CONFIG_PATH
+    _CONFIG_PATH = _DEFAULT_CONFIG_PATH if path is None else Path(path).resolve()
 
 
 def get_config() -> dict:
-    """Read and return configuration from the local `config.yaml` next to this module.
+    """Read and return configuration from the configured YAML file.
 
     Returns an empty dict if the file is missing or empty.
     """
-    path = _config_path()
-    if not path.exists():
+    if _CONFIG_PATH is None:
+        raise RuntimeError("Config path not set; call set_config_path first")
+    if not _CONFIG_PATH.exists():
         return {}
-    with open(path, "r", encoding="utf-8") as f:
+    with open(_CONFIG_PATH, "r", encoding="utf-8") as f:
         config = yaml.safe_load(f) or {}
     return config
 

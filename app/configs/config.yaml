@@ -1,0 +1,19 @@
+mqtt:
+  ip: localhost
+  port: 1883
+  trigger_topic: dunbia_seal/camera/colour/trigger
+  image_topic: dunbia_seal/camera/colour/image
+camera:
+  camera_type: opencv
+  camera_id: colour
+  capture_timeout: 10
+trigger:
+  trigger_type: software
+lights: null
+archiving:
+  is_archived: 'true'
+  archive_directory: ../data
+  archive_parameters:
+    archive_freq: daily
+    archive_storage: 50
+    archive_days: 30
