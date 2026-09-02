@@ -7,7 +7,7 @@ numpy==1.26.4
 # opencv-python needs libGL.so.1, which no CI runner or container has.
 opencv-python-headless==4.11.0.86
 paho-mqtt==2.1.0
-pillow==12.2.0
+pillow==12.3.0
 pypylon==26.5.0
 harvesters==1.4.3
 PyYAML==6.0.3
