@@ -179,7 +179,7 @@ def main(config_path: str | None = None) -> int:
             
             if require(archive_config, "is_archived"):
                 timestamp = time.strftime("%Y%m%d_%H%M%S")
-                archive_filename = f"cam{require(camera_config, 'camera_id') or '0'}_{require(camera_config, 'camera_type')}_{timestamp}"
+                archive_filename = f"cam_{require(camera_config, 'camera_id') or '0'}_{require(camera_config, 'camera_type')}_{timestamp}"
                 archive_image(image, require(archive_config, "archive_directory"), archive_filename, require(archive_config, "archive_parameters"), require(camera_config, "camera_id"))
 
             image_bytes = encode_image_to_bytes(image)
