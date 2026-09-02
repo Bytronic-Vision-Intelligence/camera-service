@@ -16,8 +16,9 @@ trigger:
   trigger_type: software
 
 lights:
-  line: 1
-  line_mode: strobe
+  line: 0
+  line_mode: output
+  line_source: ExposureActive
 
 archiving:
   is_archived: "true"

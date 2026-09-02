@@ -16,20 +16,89 @@ CTI_CANDIDATES = [
     Path("/opt/baumer-gapi-sdk-cpp/lib/libbgapi2_usb.cti"),
 
     Path(r"C:\Program Files (x86)\Optotune AG\Optotune cockpit\Resources\GenICamCtiFiles\bgapi2_gige.cti"),
-    Path(r"C:\Program Files\Baumer\Baumer GAPI SDK\bin\bgapi2_gige.cti"),
+    Path(r"C:\Users\Dunbia-L4\Desktop\pc_setup\Baumer_GAPI_SDK_2.16.1_win_x86_64_c\Baumer_GAPI_SDK_2.16.1_win_x86_64_c\bin\bgapi2_gige.cti"),
     Path(r"C:\Program Files\Lucid Vision Labs\Arena SDK\x64Release\GenTL_LUCID_v140.cti"),
     Path(r"C:\Program Files\Basler\pylon 7\Runtime\x64\ProducerGEV.cti"),
 ]
 
 
 def _genicam_enum_value(value: str) -> str:
-    """Map config strings like ``strobe`` to GenICam symbols like ``Strobe``."""
+    """Map config strings like ``output`` to GenICam symbols like ``Output``."""
     s = str(value).strip()
     if not s:
         return s
     if s.islower() or s.isupper():
         return s.capitalize()
     return s
+
+
+def _resolve_lights_config(cfg: dict) -> tuple[str, str, str | None]:
+    """Map ``lights`` config to GenICam line selector, mode, and optional source."""
+    line_selector = _line_selector_name(cfg.get("line"))
+    mode_cfg = str(cfg.get("line_mode") or "strobe").strip().lower()
+    source_cfg = str(cfg.get("line_source") or "").strip()
+
+    if mode_cfg in ("strobe", "output"):
+        line_mode = "Output"
+        line_source = _genicam_enum_value(source_cfg or "ExposureActive")
+    elif mode_cfg == "input":
+        line_mode = "Input"
+        line_source = None
+    else:
+        line_mode = _genicam_enum_value(mode_cfg)
+        if line_mode.lower() == "input":
+            line_source = None
+        else:
+            line_source = _genicam_enum_value(source_cfg or "ExposureActive")
+
+    return line_selector, line_mode, line_source
+
+
+def _enum_writable(node) -> bool:
+    try:
+        return bool(node.is_writable)
+    except Exception:
+        return False
+
+
+def _enum_symbolics(node) -> list[str]:
+    try:
+        return [entry.symbolic for entry in node.symbolics]
+    except Exception:
+        return []
+
+
+def _set_enum_value(node, value: str, label: str) -> None:
+    """Set an enumeration; tolerate already-correct state."""
+    current = str(node.value)
+    if current == value:
+        logging.info("%s already %s", label, value)
+        return
+    try:
+        node.value = value
+    except Exception as exc:
+        raise RuntimeError(
+            f"{label} not writable (current={current!r}, requested={value!r})"
+        ) from exc
+    logging.info("%s set to %s", label, value)
+
+
+def _select_line(nm, selector: str) -> bool:
+    """Select a digital IO line without rewriting LineSelector when already active."""
+    try:
+        if str(nm.LineSelector.value) == selector:
+            return True
+    except Exception:
+        pass
+
+    if not _enum_writable(nm.LineSelector):
+        try:
+            return str(nm.LineSelector.value) == selector
+        except Exception:
+            return False
+
+    nm.LineSelector.value = selector
+    return True
 
 
 def _line_selector_name(line) -> str:
@@ -51,6 +120,8 @@ class GigeCamera(Camera):
         self.harvester = None
         self.pixel_format = None
         self.trigger_type = None
+        self._lights_line_selector: str | None = None
+        self._lights_line_source: str | None = None
 
     def _find_camera(self):
         """Open by ``camera.serial_number`` when set; otherwise first available device."""
@@ -153,28 +224,71 @@ class GigeCamera(Camera):
         if line is None or str(line).strip() == "":
             return
 
-        line_selector = _line_selector_name(line)
-        line_mode = _genicam_enum_value(str(cfg.get("line_mode") or "strobe"))
-        line_source = _genicam_enum_value(str(cfg.get("line_source") or "ExposureActive"))
-
+        line_selector, line_mode, line_source = _resolve_lights_config(cfg)
         nm = camera.remote_device.node_map
+
+        if not _select_line(nm, line_selector):
+            raise RuntimeError(f"Could not select {line_selector}")
+
         try:
-            nm.LineSelector.value = line_selector
-            nm.LineMode.value = line_mode
-            if line_mode.lower() != "input":
-                nm.LineSource.value = line_source
-        except Exception as e:
+            current_mode = str(nm.LineMode.value)
+        except Exception as exc:
+            raise RuntimeError(f"Could not read LineMode on {line_selector}") from exc
+
+        if line_mode.lower() == "output" and current_mode.lower() == "input":
             raise RuntimeError(
-                f"Failed configuring lights (line={line_selector}, "
-                f"mode={line_mode}, source={line_source})"
-            ) from e
+                f"{line_selector} is input-only; use an output line for strobe "
+                f"(Cognex CIC strobe is Line0)"
+            )
+
+        _set_enum_value(nm.LineMode, line_mode, f"{line_selector} LineMode")
+
+        if line_source is not None:
+            current_source = str(nm.LineSource.value)
+            if current_source != line_source:
+                _set_enum_value(
+                    nm.LineSource,
+                    line_source,
+                    f"{line_selector} LineSource",
+                )
 
         logging.info(
             "Lights configured: LineSelector=%s LineMode=%s LineSource=%s",
             line_selector,
-            line_mode,
-            line_source if line_mode.lower() != "input" else "n/a",
+            nm.LineMode.value,
+            nm.LineSource.value if line_source is not None else "n/a",
         )
+        self._lights_line_selector = line_selector
+        self._lights_line_source = line_source
+
+    def _ensure_lights_for_capture(self, camera) -> None:
+        """Re-assert strobe LineSource before each capture if the camera reset it."""
+        if not self._lights_line_selector or not self._lights_line_source:
+            return
+        nm = camera.remote_device.node_map
+        try:
+            if not _select_line(nm, self._lights_line_selector):
+                return
+            if str(nm.LineSource.value) == self._lights_line_source:
+                return
+            nm.LineSource.value = self._lights_line_source
+            logging.info(
+                "Restored %s LineSource to %s before capture",
+                self._lights_line_selector,
+                self._lights_line_source,
+            )
+        except Exception as exc:
+            logging.debug("Could not restore lights before capture: %s", exc)
+
+    def _try_apply_lights_settings(self, camera) -> None:
+        """Apply strobe/line config; log and continue if the camera IO is read-only."""
+        try:
+            self._apply_lights_settings(camera)
+        except Exception as exc:
+            logging.warning(
+                "Could not apply lights config (%s); continuing with camera defaults",
+                exc,
+            )
 
     def connect_to_camera(self, timeout_ms: int = 5000):
         # Connect to the camera and return the camera object.
@@ -201,7 +315,6 @@ class GigeCamera(Camera):
                     continue
 
             self._apply_camera_settings(self.cam)
-            self._apply_lights_settings(self.cam)
 
             # GigE trigger_type:
             #   hardware    → line trigger (frame thread)
@@ -266,6 +379,9 @@ class GigeCamera(Camera):
                 with self.cam.fetch(timeout=timeout_s) as buffer:
                     _ = np.asarray(buffer.payload.components[0].data).copy()
 
+            # Cognex LineSource is writable after the first frame grab.
+            self._try_apply_lights_settings(self.cam)
+
             logging.info("Camera connected successfully")
             return self.cam
 
@@ -291,6 +407,7 @@ class GigeCamera(Camera):
             camera.start()
 
         try:
+            self._ensure_lights_for_capture(camera)
             if self.trigger_type == "software":
                 camera.remote_device.node_map.TriggerSoftware.execute()
             with camera.fetch(timeout=timeout_ms / 1000.0) as buffer:
@@ -378,3 +495,5 @@ class GigeCamera(Camera):
 
         self.pixel_format = None
         self.trigger_type = None
+        self._lights_line_selector = None
+        self._lights_line_source = None
