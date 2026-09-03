@@ -110,6 +110,19 @@ def test_apply_image_format_channel_and_colourmap():
     assert coloured.shape == (2, 2, 3)
 
 
+def test_apply_image_format_colourmap_uses_fixed_norm_range():
+    # Same absolute DN must map to the same colour regardless of frame min/max
+    low = np.array([[6000, 7000], [8000, 9000]], dtype=np.uint16)
+    high = np.array([[6000, 8500], [10000, 11000]], dtype=np.uint16)
+    fmt = {"colourmap": "JET", "norm_range": [6000, 11000]}
+
+    a = apply_image_format(low, fmt)
+    b = apply_image_format(high, fmt)
+
+    assert np.array_equal(a[0, 0], b[0, 0])
+    assert not np.array_equal(a[0, 1], b[0, 1])
+
+
 def test_apply_image_format_mono14_masks_to_bit_depth():
     img = np.array([[0, 4096], [8192, 65535]], dtype=np.uint16)
 

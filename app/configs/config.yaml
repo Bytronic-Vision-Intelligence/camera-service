@@ -1,17 +1,30 @@
 mqtt:
   ip: localhost
   port: 1883
-  qos: 1
-  trigger_topic: project/camera/{camera_id}/trigger
-  image_topic: project/camera/{camera_id}/image
+  trigger_topic: dunbia_seal/camera/colour/trigger
+  image_topic: dunbia_seal/camera/colour/image
 camera:
-  camera_type: opencv
   camera_id: colour
-  capture_timeout: 10
+  camera_type: gige
+  camera_ip: 192.168.1.10
+  serial_number: FC36455AAK00033
+  cti_path: C:\Users\Dunbia-L4\Desktop\pc_setup\Baumer_GAPI_SDK_2.16.1_win_x86_64_c\Baumer_GAPI_SDK_2.16.1_win_x86_64_c\bin\bgapi2_gige.cti
+  capture_timeout: 1000
+camera_settings:
+  pixel_format: BayerRG8
 trigger:
   trigger_type: software
-lights: null
-image: null
+images:
+- rgb:
+    rotate: -90
+    image_format:
+      channel: BGR2RGB
+    topic_end: null
+    archive: true
+lights:
+  line: 0
+  line_mode: output
+  line_source: ExposureActive
 archiving:
   is_archived: 'true'
   archive_directory: ../data

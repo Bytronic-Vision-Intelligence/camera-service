@@ -1,0 +1,40 @@
+mqtt:
+  ip: localhost
+  port: 1883
+  trigger_topic: dunbia_seal/thermal_1/trigger
+  image_topic: dunbia_seal/camera/thermal_1/image
+camera:
+  camera_id: thermal_1
+  camera_type: flir
+  camera_ip: 192.168.3.5
+  serial_number: '89905541'
+camera_settings:
+  buffer_size: 0
+  pixel_format: Mono14
+  cmos_bit_depth: bit14bit
+  temperature_linear_mode: true
+trigger:
+  trigger_type: continuous
+  trigger_delay: 1.0
+images:
+- raw:
+    rotate: 180
+    image_format: Mono14
+    topic_end: raw
+    archive: true
+- colourmap:
+    rotate: 180
+    image_format:
+      colourmap: JET
+      norm_range:
+      - 6000
+      - 11000
+    topic_end: colourmap
+    archive: false
+archiving:
+  is_archived: 'true'
+  archive_directory: ../data
+  archive_parameters:
+    archive_freq: hourly
+    archive_storage: 50
+    archive_days: 30

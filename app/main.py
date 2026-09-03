@@ -129,9 +129,22 @@ def main(config_path: str | None = None) -> int:
     # internal/software → MQTT + capture_image; external/hardware/continuous (FLIR/dummy) → frame thread.
     _trigger = str(require(trigger_config, "trigger_type")).strip().lower()
     camera_type = str(require(camera_config, "camera_type")).strip().lower()
+    is_continuous = _trigger == "continuous"
     is_frame_trigger = _trigger in ("external", "hardware") or (
-        _trigger == "continuous" and camera_type in ("flir", "dummy")
+        is_continuous and camera_type in ("flir", "dummy")
     )
+    try:
+        trigger_delay_s = float(trigger_config.get("trigger_delay", 0) or 0)
+    except (TypeError, ValueError) as e:
+        raise SystemExit(
+            f"Invalid trigger.trigger_delay in {loadConfig._CONFIG_PATH}: {e}"
+        ) from e
+    if trigger_delay_s < 0:
+        raise SystemExit(
+            f"trigger.trigger_delay must be >= 0 in {loadConfig._CONFIG_PATH}"
+        )
+    # Continuous mode: publish at most once per trigger_delay seconds (0 = uncapped).
+    last_image_at = 0.0
 
     if not is_frame_trigger:
         subscribe_thread = start_subscribe_thread(
@@ -174,6 +187,15 @@ def main(config_path: str | None = None) -> int:
             elif "trigger" not in str(message):
                 continue
 
+            if is_continuous and trigger_delay_s > 0:
+                remaining = trigger_delay_s - (time.monotonic() - last_image_at)
+                if remaining > 0:
+                    # Hold off until the next slot; then take a fresh frame.
+                    if stop_event.wait(remaining):
+                        break
+                    continue
+                last_image_at = time.monotonic()
+
             start_time = time.time()
             date_time = encode_date_time_to_bytes()
 
@@ -194,7 +216,7 @@ def main(config_path: str | None = None) -> int:
             timestamp = time.strftime("%Y%m%d_%H%M%S")
             for output in image_outputs:
                 try:
-                    variant = apply_image_format(image, output["image_format"])
+                    variant = apply_image_format(image, output)
                 except Exception as e:
                     logging.error(
                         "Failed to apply image_format for image %s: %s",
