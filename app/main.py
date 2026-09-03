@@ -126,11 +126,14 @@ def main(config_path: str | None = None) -> int:
     signal.signal(signal.SIGTERM, _request_shutdown)
 
     # GigE: hardware | software | continuous. LJS/others: external | internal.
-    # internal/software → MQTT + capture_image; external/hardware → frame thread.
+    # internal/software → MQTT + capture_image; external/hardware/continuous (FLIR/dummy) → frame thread.
     _trigger = str(require(trigger_config, "trigger_type")).strip().lower()
-    is_external_trigger = _trigger in ("external", "hardware")
+    camera_type = str(require(camera_config, "camera_type")).strip().lower()
+    is_frame_trigger = _trigger in ("external", "hardware") or (
+        _trigger == "continuous" and camera_type in ("flir", "dummy")
+    )
 
-    if not is_external_trigger:
+    if not is_frame_trigger:
         subscribe_thread = start_subscribe_thread(
             require(mqtt_config, "ip"),
             require(mqtt_config, "port"),
@@ -151,9 +154,6 @@ def main(config_path: str | None = None) -> int:
             
             try:
                 message = event_queue.get(timeout = 1.0)
-                if not "trigger" in message:
-                    continue
-                start_time = time.time()
             except Empty:
                 continue
 
@@ -167,20 +167,25 @@ def main(config_path: str | None = None) -> int:
                 logging.info("Received invalid trigger payload; ignoring.")
                 continue
 
+            if is_frame_trigger:
+                if not isinstance(message, np.ndarray):
+                    logging.error("Expected image frame from queue, got %s", type(message))
+                    continue
+            elif "trigger" not in str(message):
+                continue
+
+            start_time = time.time()
             date_time = encode_date_time_to_bytes()
 
             logging.info("Capturing image...")
-            if not is_external_trigger:
+            if is_frame_trigger:
+                image = message
+            else:
                 try:
                     image = camera.capture_image(timeout_ms=require(camera_config, "capture_timeout"))
                 except Exception as e:
                     logging.error("Capture failed; skipping trigger: %s", e, exc_info=True)
                     continue
-            else:
-                if not isinstance(message, np.ndarray):
-                    logging.error("Expected image frame from queue, got %s", type(message))
-                    continue
-                image = message
 
             if image is None:
                 logging.error("No image available to encode.")
