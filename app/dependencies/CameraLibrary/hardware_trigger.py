@@ -15,7 +15,7 @@ from typing import Callable, Optional
 
 import numpy as np
 
-from dependencies import loadConfig
+from dependencies import service_settings
 
 logger = logging.getLogger(__name__)
 
@@ -42,10 +42,14 @@ def is_camera_loss_error(exc: BaseException) -> bool:
 
 
 def report_camera_loss(exc: BaseException, *, queue: Optional[Queue] = None) -> CameraLossError:
-    """Log/print a single CAMERA LOSS report and optionally enqueue it for main."""
+    """Log a single CAMERA LOSS report and optionally enqueue it for main."""
     loss = CameraLossError(str(exc))
+    # critical(), and nothing else. This used to print the same line as well,
+    # for a terminal nobody watches -- and print() is the one place it could
+    # not arrive, because stdout under the orchestrator is a pipe that
+    # block-buffers until several KB accumulate and loses the lot if the
+    # service dies. A camera loss is exactly when the service dies.
     logger.critical("CAMERA LOSS: %s", exc)
-    print(f"CAMERA LOSS: {exc}", flush=True)
     if queue is not None:
         try:
             queue.put(loss)
@@ -66,7 +70,7 @@ class HardwareTriggerConfig:
     @classmethod
     def from_app_config(cls, cfg: Optional[dict] = None) -> "HardwareTriggerConfig":
         if cfg is None:
-            cfg = loadConfig.get_section("trigger")
+            cfg = service_settings.get_section("trigger")
         trigger_type = str(cfg.get("trigger_type", "")).lower()
         return cls(
             enabled=trigger_type == "external",

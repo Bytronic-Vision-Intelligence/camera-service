@@ -69,9 +69,9 @@ class FlirCamera(Camera):
         Mono16 is accepted but bits 14–15 must be masked (always 1 on AX5).
         """
         try:
-            from dependencies import loadConfig
+            from dependencies import service_settings
 
-            cfg = loadConfig.get_section("camera_settings")
+            cfg = service_settings.get_section("camera_settings")
             pixel_format = str(cfg.get("pixel_format", "Mono14"))
             cmos_depth = str(cfg.get("cmos_bit_depth", "bit14bit"))
             temp_linear = str(cfg.get("temperature_linear_mode", "false")).lower()
@@ -113,9 +113,9 @@ class FlirCamera(Camera):
         self.cam = None
 
         try:
-            from dependencies import loadConfig
+            from dependencies import service_settings
 
-            serial = str(loadConfig.return_config_value("camera.serial_number") or "").strip()
+            serial = str(service_settings.return_config_value("camera.serial_number") or "").strip()
         except Exception:
             serial = ""
 

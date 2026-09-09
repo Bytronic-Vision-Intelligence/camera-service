@@ -1,0 +1,48 @@
+# Settings for the end-to-end check in build-binary.sh, and nothing else.
+#
+# The shipped config.example.yaml opens a real camera. There is none inside the
+# container the check runs in, so the service would fail on connect and the
+# message path -- the thing being checked -- would never be reached.
+#
+# camera_type: dummy replays images from a directory instead, which is what it
+# exists for. The frames come from docker-local/e2e-assets/, copied in beside
+# the binary.
+
+project: project
+
+mqtt:
+  mqtt_ip: localhost
+  mqtt_port: 1883
+  qos: 1
+
+  topics:
+    - name: trigger
+      topic: project/camera/colour_1/trigger
+      is_subscribe: true
+      is_trigger: true
+
+    - name: image
+      topic: project/camera/colour_1/image
+      is_subscribe: false
+
+service:
+  camera:
+    camera_type: dummy
+    camera_id: colour_1
+    capture_timeout_ms: 5000
+    dummy_location: "/svc/frames"
+    file_type: ".png"
+
+  trigger:
+    trigger_type: software
+
+  archiving:
+    is_archived: false
+    archive_directory: save_dir
+    archive_params:
+      archive_freq: daily
+      archive_storage: 50
+      archive_days: 30
+
+logging:
+  level: INFO

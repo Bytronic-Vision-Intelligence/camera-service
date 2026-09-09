@@ -1,0 +1,54 @@
+# gige: a GenICam camera through harvesters.
+#
+# Reference only -- nothing loads this file. See ../../config.example.yaml for
+# the annotated shape.
+
+project: indonesia
+
+mqtt:
+  mqtt_ip: localhost
+  mqtt_port: 1883
+  qos: 1
+
+  topics:
+    - name: trigger
+      topic: indonesia/inference/trigger
+      is_subscribe: true
+      is_trigger: true
+
+    - name: image
+      topic: indonesia/camera/image
+      is_subscribe: false
+
+service:
+  camera:
+    camera_type: gige
+    camera_id: 1
+    camera_ip: 192.168.2.10
+    serial_number: "25165090"
+    # Milliseconds, passed to buffer fetch.
+    capture_timeout_ms: 5000
+    # Path to a GenTL producer .cti. Unset, the known locations are searched.
+    # gentl_cti: "/opt/vendor/producer.cti"
+
+  camera_settings:
+    pixel_format: BayerRG8
+
+  trigger:
+    # GigE accepts a third value:
+    #   hardware   -> line trigger, frame thread
+    #   software   -> GenICam TriggerSoftware, driven by MQTT
+    #   continuous -> TriggerMode off; MQTT pulls the newest ready frame, which
+    #                 may be stale
+    trigger_type: software
+
+  archiving:
+    is_archived: true
+    archive_directory: "save_dir"
+    archive_params:
+      archive_freq: "daily"
+      archive_storage: 50       # GB
+      archive_days: 30          # days
+
+logging:
+  level: INFO

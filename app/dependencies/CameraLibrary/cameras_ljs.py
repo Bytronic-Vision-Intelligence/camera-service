@@ -18,7 +18,7 @@ from typing import Any, Optional
 
 import numpy as np
 
-from dependencies import loadConfig
+from dependencies import service_settings
 
 from . import settings_ljs
 from .cameras import CameraHeightMap
@@ -118,7 +118,7 @@ class LJSCamera(CameraHeightMap):
 
     def __init__(self, **overrides: Any) -> None:
         super().__init__()
-        cfg = dict(loadConfig.get_section("camera").get("ljs") or {})
+        cfg = dict(service_settings.get_section("camera").get("ljs") or {})
         cfg.update(overrides)
 
         self.host = str(cfg.get("host", "192.168.0.1"))

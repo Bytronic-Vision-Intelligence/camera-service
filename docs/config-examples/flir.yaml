@@ -1,0 +1,61 @@
+# flir: an AX5 over PySpin, externally triggered by a light gate.
+#
+# PySpin ships only as a Windows wheel
+# (app/dependencies/spinnaker_python-...-win_amd64.whl); there is no Linux
+# build, so install it by hand on FLIR machines.
+#
+# Reference only -- nothing loads this file. See ../../config.example.yaml for
+# the annotated shape.
+
+project: indonesia
+
+mqtt:
+  mqtt_ip: localhost
+  mqtt_port: 1883
+  qos: 1
+
+  topics:
+    - name: trigger
+      topic: indonesia/inference/trigger
+      is_subscribe: true
+      is_trigger: true
+
+    - name: image
+      topic: indonesia/camera/image
+      is_subscribe: false
+
+service:
+  camera:
+    camera_type: flir
+    camera_id: 1
+    serial_number: "73400462"
+    # Milliseconds, passed to GetNextImage.
+    capture_timeout_ms: 5000
+
+  camera_settings:
+    buffer_size: 0
+    # AX5 raw radiometric stream. The camera defaults to 8-bit, which keeps
+    # pixels in 0-255 and throws the radiometry away.
+    pixel_format: Mono14
+    cmos_bit_depth: bit14bit
+    # true = temperature-linear counts; false = raw 14-bit signal
+    temperature_linear_mode: true
+
+  trigger:
+    trigger_type: external
+    # Line0 is the opto-isolated GPI (light gate). Keep it unless the wiring
+    # differs.
+    trigger_source: Line0
+    # RisingEdge | FallingEdge | AnyEdge -- flip for an idle-high gate.
+    trigger_activation: RisingEdge
+
+  archiving:
+    is_archived: true
+    archive_directory: "../save_dir"
+    archive_params:
+      archive_freq: "hourly"
+      archive_storage: 50       # GB
+      archive_days: 30          # days
+
+logging:
+  level: INFO

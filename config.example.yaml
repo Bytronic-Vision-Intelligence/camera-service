@@ -1,0 +1,100 @@
+# camera-service: capture a frame on a trigger and publish it.
+#
+# This is the documented SHAPE of a camera-service configuration, and the copy
+# that ships beside the binary in a release. It is not deployment config:
+# service-orchestrator writes the real one and launches the binary pointed at
+# it with --config, so one binary can serve several cameras.
+#
+# Tracked as config.example.yaml, never as config.yaml. The orchestrator writes
+# config.yaml into this directory and this repository is PUBLIC, so a tracked
+# config.yaml would leave a customer's brokers and topics one `git add -A` away
+# from being published.
+
+# Topic namespace for this installation.
+project: project
+
+mqtt:
+  mqtt_ip: localhost
+  mqtt_port: 1883
+  qos: 1
+
+  # Topics are looked up BY NAME, so a deployment can call them whatever it
+  # likes but must keep these two names:
+  #
+  #   trigger - a capture request arrives here. Only subscribed to when the
+  #             camera is triggered by software; an externally triggered
+  #             camera delivers frames itself and nothing subscribes.
+  #   image   - the encoded frame is published here.
+  topics:
+    - name: trigger
+      topic: project/camera/colour_1/trigger
+      is_subscribe: true
+      is_trigger: true
+
+    - name: image
+      topic: project/camera/colour_1/image
+      is_subscribe: false
+
+# Settings belonging to this service alone. Drivers read them by dotted path
+# beneath here, so `camera.serial_number` means service.camera.serial_number.
+service:
+  camera:
+    # opencv | dummy | pylon | gige | flir | ljs
+    camera_type: opencv
+    camera_id: colour_1
+
+    # Milliseconds, handed to the vendor SDK's grab call. Cameras that grab on
+    # demand -- opencv and dummy -- ignore it. Was `capture_timout: 10` before
+    # the config was reshaped, which is 10ms: enough for a real Pylon or FLIR
+    # grab to time out on every trigger.
+    capture_timeout_ms: 5000
+
+    # camera_type: dummy replays images from a directory instead of opening
+    # any hardware. Both keys are required when it is selected.
+    # dummy_location: "./test"
+    # file_type: ".png"
+
+    # Open one specific camera. Unset, the first one found is used.
+    # serial_number: 25165090
+    # gentl_cti: "/opt/vendor/producer.cti"
+
+    # camera_type: ljs connects directly to an LJ-S head. See
+    # app/dependencies/CameraLibrary/settings_ljs.py for the full set.
+    # ljs:
+    #   host: "192.168.0.1"
+    #   port: 24691
+    #   high_speed_port: 24692
+
+  # How this camera is told to take a picture. Read here by main.py and by the
+  # drivers alike -- hardware_trigger and the GigE driver both take it from
+  # this section, so it lives in one place and cannot disagree with itself.
+  trigger:
+    # software, internal -> capture when a trigger message arrives
+    # hardware, external -> the camera delivers frames on its own
+    # GigE also accepts `continuous`: TriggerMode off, newest ready frame.
+    trigger_type: software
+
+    # Externally triggered cameras only. Line0 is the opto-isolated GPI on a
+    # FLIR AX5; change it only if the wiring differs.
+    # trigger_source: Line0
+    # RisingEdge | FallingEdge | AnyEdge -- flip for an idle-high gate.
+    # trigger_activation: RisingEdge
+
+  # Applied on connect by the gige and flir drivers.
+  # camera_settings:
+  #   pixel_format: BayerRG8
+
+  archiving:
+    is_archived: true
+    archive_directory: save_dir
+    archive_params:
+      archive_freq: daily
+      archive_storage: 50       # GB
+      archive_days: 30          # days
+
+# How much this service says. It writes no log files: it logs to stdout, the
+# orchestrator forwards every line to project/logging/<service>, and
+# logging-service is the only thing that writes to disk.
+# DEBUG | INFO | WARNING | ERROR | CRITICAL
+logging:
+  level: INFO

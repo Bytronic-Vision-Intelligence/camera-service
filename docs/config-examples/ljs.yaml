@@ -1,0 +1,60 @@
+# ljs: a Keyence LJ-S640 head over direct Ethernet, no controller.
+# See app/dependencies/CameraLibrary/cameras_ljs.py.
+#
+# Reference only -- nothing loads this file. See ../../config.example.yaml for
+# the annotated shape.
+
+project: indonesia
+
+mqtt:
+  mqtt_ip: localhost
+  mqtt_port: 1883
+  qos: 1
+
+  topics:
+    - name: trigger
+      topic: indonesia/inference/trigger
+      is_subscribe: true
+      is_trigger: true
+
+    - name: image
+      topic: indonesia/camera/image
+      is_subscribe: false
+
+service:
+  camera:
+    camera_type: ljs
+    camera_id: 1
+    capture_timeout_ms: 5000
+    ljs:
+      host: "192.168.0.1"
+      port: 24691
+      high_speed_port: 24692    # must differ from `port`
+      device_id: 0
+      program: 0                # active program number, 0-15
+      timeout_s: 5.0
+      use_image_filter: false
+      interpolate_y: 4          # repeat each Y line 1-8x to match X pitch
+      settings:                 # applied to `program` on connect
+        exposure_time_us: 640   # see settings_ljs.py for the full registry
+        dynamic_range: 4
+        light_control_mode: "AUTO"
+        light_control_upper: 90
+        light_control_lower: 10
+        detection_sensitivity: 3
+
+  trigger:
+    trigger_type: internal
+
+  archiving:
+    is_archived: true
+    archive_directory: "save_dir"
+    archive_params:
+      archive_freq: "daily"
+      archive_storage: 50       # GB
+      archive_days: 30          # days
+      # Archived PNGs keep original values (uint16 counts / encoded
+      # float mm). LJS: mm = (pixel - 32768) / 100; pixel 0 = invalid.
+
+logging:
+  level: INFO

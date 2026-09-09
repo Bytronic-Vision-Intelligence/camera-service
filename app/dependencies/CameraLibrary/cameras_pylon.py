@@ -1,6 +1,6 @@
 from pypylon import pylon
 from dependencies.CameraLibrary.cameras import Camera
-from dependencies import loadConfig
+from dependencies import service_settings
 from queue import Queue
 from threading import Event
 import logging
@@ -16,7 +16,7 @@ class PylonCamera(Camera):
         self.cam = None
 
         try:
-            serial = str(loadConfig.return_config_value("camera.serial_number") or "").strip()
+            serial = str(service_settings.return_config_value("camera.serial_number") or "").strip()
         except Exception:
             serial = ""
 
