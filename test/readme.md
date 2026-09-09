@@ -1,7 +1,7 @@
 # Tests
 
-Pytest, covering image encoding and configuration loading. No camera or broker
-is required — nothing here touches hardware.
+Pytest, covering image encoding, configuration loading, and optional camera
+backend smoke checks. Unit tests need no camera or broker.
 
 ```bash
 .venv/bin/python -m pytest test
@@ -18,6 +18,12 @@ is required — nothing here touches hardware.
 - `loadConfig` — `set_config_path` (the hook service-orchestrator drives via
   `main.py --config <path>`), dotted key paths such as `camera.camera_type`,
   and `get_section`'s empty-dict fallbacks
+- `test_camera_backends` — for each preset in
+  `test/fixtures/camera_backend_configs.yaml` (mirrors the camera blocks in
+  the orchestrator `config-camera_service_test.yaml`), asserts required keys,
+  then connect + capture. `dummy` always runs when the image directory exists;
+  hardware types skip unless `RUN_CAMERA_HW_TESTS=1`, and still skip if the
+  device is absent
 
 `set_config_path` is process-global, so an autouse fixture resets it after
 every test. Without that, one test's override leaks into the next.
