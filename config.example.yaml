@@ -27,12 +27,12 @@ mqtt:
   #   image   - the encoded frame is published here.
   topics:
     - name: trigger
-      topic: project/camera/colour_1/trigger
+      topic: project/camera/{camera_id}/trigger
       is_subscribe: true
       is_trigger: true
 
     - name: image
-      topic: project/camera/colour_1/image
+      topic: project/camera/{camera_id}/image
       is_subscribe: false
 
 # Settings belonging to this service alone. Drivers read them by dotted path
