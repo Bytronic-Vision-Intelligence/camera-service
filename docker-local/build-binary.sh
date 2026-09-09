@@ -36,7 +36,31 @@ PYTHON_VERSION="${PYTHON_VERSION:-3.10}"
 # the script inline in `scripts:`.
 SCRIPT_PATH=$(sed -n 's/^ *SCRIPT: *//p' "$WORKFLOW" | head -1 | tr -d "\"'")
 [ -n "$SCRIPT_PATH" ] || SCRIPT_PATH=$(awk -F'"' '/^ *scripts:/ {print $2; exit}' "$WORKFLOW")
-EXTRA_ARGS=$(awk -F': ' '/^ *additional-args:/ {sub(/^ +/,"",$2); print $2; exit}' "$WORKFLOW")
+# additional-args may be a plain scalar or a YAML folded block (`>-`), which
+# is how it is written once there is more than one flag. GitHub folds the block
+# into one line; reading only the first line here gives the literal `>-` and
+# silently drops every flag -- including `--paths app`, without which the
+# binary builds perfectly and dies on its first import. Which is exactly what
+# happened.
+EXTRA_ARGS=$(awk '
+  /^ *additional-args:/ {
+    line = $0
+    sub(/^ *additional-args: */, "", line)
+    match($0, /^ */); indent = RLENGTH
+    if (line == ">-" || line == ">" || line == "|" || line == "|-" || line == "") {
+      while ((getline next_line) > 0) {
+        if (next_line ~ /^ *$/) continue
+        match(next_line, /^ */); next_indent = RLENGTH
+        if (next_indent <= indent) break
+        sub(/^ */, "", next_line)
+        folded = folded (folded == "" ? "" : " ") next_line
+      }
+      print folded
+    } else {
+      print line
+    }
+    exit
+  }' "$WORKFLOW")
 # Strip surrounding quotes: `additional-args: ""` must mean no arguments, not a
 # literal empty string, which PyInstaller would take as the script name.
 EXTRA_ARGS="${EXTRA_ARGS%\"}"; EXTRA_ARGS="${EXTRA_ARGS#\"}"
@@ -44,9 +68,9 @@ EXTRA_ARGS="${EXTRA_ARGS%\'}"; EXTRA_ARGS="${EXTRA_ARGS#\'}"
 : "${SCRIPT_PATH:?could not read \`scripts:\` from $WORKFLOW}"
 
 # Which file the workflow copies in beside the binary. Read rather than
-# assumed: this repository is public, so the orchestrator's config.yaml is
-# gitignored here and what ships is config.example.yaml. Hardcoding either name
-# would test a file the release does not use.
+# assumed: a service whose repository is public gitignores the config.yaml the
+# orchestrator writes and ships config.example.yaml instead. Hardcoding either
+# name would test a file that service's release does not use.
 CONFIG_SOURCE=$(sed -n 's|^ *cp \([^ ]*\) "\$output_dir/config.yaml".*|\1|p' "$WORKFLOW" | head -1)
 CONFIG_SOURCE="${CONFIG_SOURCE:-config.yaml}"
 : "${CONFIG_SOURCE:?could not read the config the workflow ships from $WORKFLOW}"
@@ -127,6 +151,21 @@ BUILD="$TREE/.pkg/build/build-linux-amd64"
 rm -rf "$TREE/.pkg"; mkdir -p "$BUILD"
 cp "$BINARY" "$BUILD/"
 cp "$REPO_ROOT/$CONFIG_SOURCE" "$BUILD/config.yaml"
+
+# Everything else the workflow copies in beside the binary, read out of the
+# workflow rather than listed here. A service that ships an installer or a
+# requirements file alongside its binary would otherwise be packaged one way in
+# CI and another way locally, and the local run is the one that claims to check
+# what a customer receives.
+sed -n 's|^ *cp \([^ ]*\) "\$output_dir/\([^"]*\)".*|\1 \2|p' "$WORKFLOW" | while read -r src dst; do
+  [ "$dst" = "config.yaml" ] && continue
+  if [ -f "$REPO_ROOT/$src" ]; then
+    cp "$REPO_ROOT/$src" "$BUILD/$dst"
+    echo "==> also shipping: $dst"
+  else
+    echo "==> FAIL: the workflow ships $src and it is not in the tree"; exit 1
+  fi
+done
 
 # The damage an artifact round-trip does: the executable bit is not preserved,
 # and an empty directory is not stored.
@@ -271,7 +310,16 @@ echo "    subscribed  ok"
 # The template publishes nothing (its worker is a placeholder), so it relies on
 # the marker; logging-service republishes, so it does not.
 OUT_TOPIC=$(awk '/is_subscribe: *false/{found=1} /^ *- name:/{t=""} /^ *topic:/{gsub(/^ *topic: *"?|"? *$/,""); t=$0} found&&t{print t; exit}' "$RUN/config.yaml")
-MARKER="${E2E_MARKER:-Request received}"
+# A service that reports differently says so in docker-local/e2e-marker, next
+# to e2e-config.yaml and e2e-assets/. In the script it would be a divergence in
+# a file that is meant to be identical in every repository -- and the last time
+# these drifted, one of them had been packaging every service under the
+# template's name for weeks.
+MARKER="${E2E_MARKER:-}"
+if [ -z "$MARKER" ] && [ -f "$TREE/docker-local/e2e-marker" ]; then
+  MARKER=$(head -1 "$TREE/docker-local/e2e-marker")
+fi
+MARKER="${MARKER:-Request received}"
 
 if [ -n "$OUT_TOPIC" ]; then
   echo "    watching output topic: $OUT_TOPIC"
