@@ -1,6 +1,5 @@
 from harvesters.core import Harvester
 from dependencies.CameraLibrary.cameras import Camera
-from dependencies import loadConfig
 from queue import Queue
 from threading import Event
 import logging
@@ -23,8 +22,16 @@ CTI_CANDIDATES = [
 
 
 class GigeCamera(Camera):
-    def __init__(self):
+    def __init__(self, settings: dict | None = None):
+        """
+        Args:
+            settings: the service's own `service:` section. Handed in rather
+                than read from anywhere: a driver that reaches for a global
+                config can only be exercised with a config file on disk, and
+                cannot be told about two cameras at once.
+        """
         super().__init__()
+        self.settings = dict(settings or {})
         self.cam = None
         self.harvester = None
         self.pixel_format = None
@@ -36,13 +43,13 @@ class GigeCamera(Camera):
         self.harvester = None
 
         try:
-            serial = str(loadConfig.return_config_value("camera.serial_number") or "").strip()
+            serial = str((self.settings.get("camera") or {}).get("serial_number") or "").strip()
         except Exception:
             serial = ""
 
         try:
             try:
-                configured = str(loadConfig.return_config_value("camera.gentl_cti") or "").strip()
+                configured = str((self.settings.get("camera") or {}).get("gentl_cti") or "").strip()
             except Exception:
                 configured = ""
 
@@ -106,7 +113,7 @@ class GigeCamera(Camera):
     def _apply_camera_settings(self, camera) -> None:
         """Apply optional ``camera_settings`` from the nested config (no trigger setup)."""
         nm = camera.remote_device.node_map
-        cfg = loadConfig.get_section("camera_settings")
+        cfg = self.settings.get("camera_settings") or {}
 
         pixel_format = str(cfg.get("pixel_format") or "").strip()
         if pixel_format:
@@ -151,7 +158,7 @@ class GigeCamera(Camera):
             #   hardware    → line trigger (frame thread)
             #   software    → GenICam TriggerSoftware (MQTT)
             #   continuous  → TriggerMode Off; MQTT pulls next ready frame (may be stale)
-            trigger_cfg = loadConfig.get_section("trigger")
+            trigger_cfg = self.settings.get("trigger") or {}
             trigger_type = str(trigger_cfg.get("trigger_type") or "software").strip().lower()
             if trigger_type not in ("hardware", "software", "continuous"):
                 raise RuntimeError(

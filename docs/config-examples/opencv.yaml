@@ -1,0 +1,42 @@
+# opencv: the machine's own webcam. The default, and what the integration run uses.
+#
+# Reference only -- nothing loads this file. See ../../config.example.yaml for
+# the annotated shape.
+
+project: indonesia
+
+mqtt:
+  mqtt_ip: localhost
+  mqtt_port: 1883
+  qos: 1
+
+  topics:
+    - name: trigger
+      topic: indonesia/inference/trigger
+      is_subscribe: true
+      is_trigger: true
+
+    - name: image
+      topic: indonesia/camera/image
+      is_subscribe: false
+
+service:
+  camera:
+    camera_type: opencv
+    camera_id: 0
+    # Ignored: opencv grabs on demand.
+    capture_timeout: 5000
+
+  trigger:
+    trigger_type: internal
+
+  archiving:
+    is_archived: true
+    archive_directory: "save_dir"
+    archive_parameters:
+      archive_freq: "daily"
+      archive_storage: 50       # GB
+      archive_days: 30          # days
+
+logging:
+  level: INFO

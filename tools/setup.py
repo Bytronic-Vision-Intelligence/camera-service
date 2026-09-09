@@ -2,7 +2,7 @@
 Create the project virtualenv and install dependencies.
 
 Run from the project root:
-    python app/setup.py
+    python tools/setup.py
 """
 
 from __future__ import annotations
@@ -12,10 +12,12 @@ import sys
 import venv
 from pathlib import Path
 
-APP_DIR = Path(__file__).resolve().parent
-ROOT = APP_DIR.parent
+TOOLS_DIR = Path(__file__).resolve().parent
+ROOT = TOOLS_DIR.parent
 VENV_DIR = ROOT / ".venv"
-REQUIREMENTS = ROOT / "requirements.txt"
+# requirements-dev.txt pulls in requirements.txt via `-r`, so this installs
+# both: a developer needs the test tooling, which the shipped binary does not.
+REQUIREMENTS = ROOT / "requirements-dev.txt"
 
 
 def venv_python(venv_dir: Path) -> Path:

@@ -15,7 +15,6 @@ from typing import Callable, Optional
 
 import numpy as np
 
-from dependencies import loadConfig
 
 logger = logging.getLogger(__name__)
 
@@ -42,10 +41,14 @@ def is_camera_loss_error(exc: BaseException) -> bool:
 
 
 def report_camera_loss(exc: BaseException, *, queue: Optional[Queue] = None) -> CameraLossError:
-    """Log/print a single CAMERA LOSS report and optionally enqueue it for main."""
+    """Log a single CAMERA LOSS report and optionally enqueue it for main."""
     loss = CameraLossError(str(exc))
+    # critical(), and nothing else. This used to print the same line as well,
+    # for a terminal nobody watches -- and print() is the one place it could
+    # not arrive, because stdout under the orchestrator is a pipe that
+    # block-buffers until several KB accumulate and loses the lot if the
+    # service dies. A camera loss is exactly when the service dies.
     logger.critical("CAMERA LOSS: %s", exc)
-    print(f"CAMERA LOSS: {exc}", flush=True)
     if queue is not None:
         try:
             queue.put(loss)
@@ -64,9 +67,14 @@ class HardwareTriggerConfig:
     poll_interval_s: float = 0.001
 
     @classmethod
-    def from_app_config(cls, cfg: Optional[dict] = None) -> "HardwareTriggerConfig":
-        if cfg is None:
-            cfg = loadConfig.get_section("trigger")
+    def from_trigger_settings(cls, cfg: dict) -> "HardwareTriggerConfig":
+        """Build from the `service.trigger` section.
+
+        Args:
+            cfg: the trigger settings. Required: this used to fall back to
+                reading the process-global config, which meant the caller could
+                not tell whether it had configured the trigger or not.
+        """
         trigger_type = str(cfg.get("trigger_type", "")).lower()
         return cls(
             enabled=trigger_type == "external",
