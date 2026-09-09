@@ -21,11 +21,11 @@ CONFIG_EXAMPLE = Path(__file__).resolve().parent.parent / "config.example.yaml"
 
 
 def make_topics():
-    """The shape shipped in config.example.yaml."""
+    """The shape shipped in config.example.yaml, placeholders and all."""
     return [
-        {"name": "trigger", "topic": "project/camera/colour_1/trigger",
+        {"name": "trigger", "topic": "project/camera/{camera_id}/trigger",
          "is_subscribe": True, "is_trigger": True},
-        {"name": "image", "topic": "project/camera/colour_1/image",
+        {"name": "image", "topic": "project/camera/{camera_id}/image",
          "is_subscribe": False},
     ]
 
@@ -36,10 +36,11 @@ def make_config(**overrides):
         "mqtt": {"mqtt_ip": "127.0.0.1", "mqtt_port": 1883, "topics": make_topics()},
         "service": {
             "camera": {"camera_type": "opencv", "camera_id": "colour_1",
-                       "capture_timeout_ms": 5000},
+                       "capture_timeout": 5000},
             "trigger": {"trigger_type": "software"},
+            "image": None,
             "archiving": {"is_archived": False, "archive_directory": "save_dir",
-                          "archive_params": {}},
+                          "archive_parameters": {}},
         },
         "logging": {"level": "INFO"},
     }
@@ -153,14 +154,16 @@ def test_a_section_present_but_empty_is_refused():
 # --- topic_named ---------------------------------------------------------
 
 def test_topic_named_returns_the_topic_declared_under_that_name():
-    assert main.topic_named(make_topics(), "image") == "project/camera/colour_1/image"
+    assert main.topic_named(make_topics(), "image", {"camera_id": "colour_1"}) == \
+        "project/camera/colour_1/image"
 
 
 def test_topic_named_exits_when_no_entry_carries_the_name():
     """A camera whose image topic is missing would otherwise connect, report
     itself healthy and publish into nothing."""
     with pytest.raises(SystemExit, match="No topic named 'image'"):
-        main.topic_named([t for t in make_topics() if t["name"] != "image"], "image")
+        main.topic_named([t for t in make_topics() if t["name"] != "image"], "image",
+                         {"camera_id": "colour_1"})
 
 
 def test_topic_named_exits_when_the_entry_has_no_topic():
@@ -168,7 +171,7 @@ def test_topic_named_exits_when_the_entry_has_no_topic():
     named "": publishing to an empty string is accepted by the broker and read
     by nobody."""
     with pytest.raises(SystemExit, match="no `topic:` value"):
-        main.topic_named([{"name": "image", "topic": ""}], "image")
+        main.topic_named([{"name": "image", "topic": ""}], "image", {})
 
 
 # --- is_capture_request --------------------------------------------------
@@ -187,6 +190,95 @@ def test_a_frame_is_never_mistaken_for_a_capture_request():
     membership test skipped every frame the camera captured -- the whole
     hardware-trigger path did nothing, silently."""
     assert not main.is_capture_request(frame())
+
+
+# --- placeholders --------------------------------------------------------
+
+def test_a_placeholder_is_filled_from_the_service_settings():
+    """One configuration serves any camera: the id is written once and the
+    topics follow it."""
+    assert main.fill_placeholders(
+        "project/camera/{camera_id}/image", {"camera_id": "thermal_1"}) == \
+        "project/camera/thermal_1/image"
+
+
+def test_a_topic_with_no_placeholder_is_left_alone():
+    assert main.fill_placeholders("project/camera/colour_1/image", {}) == \
+        "project/camera/colour_1/image"
+
+
+def test_a_placeholder_nothing_can_fill_is_refused_at_startup():
+    """Left in, it is published and subscribed to literally: the service comes
+    up, reports itself healthy, and matches no camera at all. That is what
+    `project/camera/{camera_id}/image` did before anything substituted it."""
+    with pytest.raises(SystemExit, match="serial_number"):
+        main.fill_placeholders("project/camera/{serial_number}/image",
+                               {"camera_id": "colour_1"})
+
+
+def test_a_malformed_template_is_refused_rather_than_published():
+    with pytest.raises(SystemExit, match="not a valid template"):
+        main.fill_placeholders("project/camera/{camera_id/image",
+                               {"camera_id": "colour_1"})
+
+
+def test_topic_named_fills_the_placeholder_it_finds():
+    assert main.topic_named(make_topics(), "trigger", {"camera_id": "thermal_1"}) == \
+        "project/camera/thermal_1/trigger"
+
+
+# --- read_settings -------------------------------------------------------
+
+def test_read_settings_returns_what_the_loop_runs_on():
+    settings = main.read_settings(make_config())
+
+    assert settings["broker_ip"] == "127.0.0.1"
+    assert settings["trigger_topic"] == "project/camera/colour_1/trigger"
+    assert settings["image_topic"] == "project/camera/colour_1/image"
+    assert settings["capture_timeout"] == 5000
+    assert settings["is_external_trigger"] is False
+
+
+def test_an_externally_triggered_camera_needs_no_trigger_topic():
+    """Nothing subscribes, so a config without one must not be refused."""
+    config = make_config()
+    config["service"]["trigger"]["trigger_type"] = "hardware"
+    config["mqtt"]["topics"] = [t for t in make_topics() if t["name"] != "trigger"]
+
+    settings = main.read_settings(config)
+
+    assert settings["trigger_topic"] is None
+    assert settings["image_topic"] == "project/camera/colour_1/image"
+
+
+def test_read_settings_refuses_a_config_missing_a_key_the_loop_needs():
+    """capture_timeout used to be read inside the loop, so a config without it
+    started the service, opened the camera, subscribed -- and failed on the
+    first trigger, with everything up to then looking healthy."""
+    config = make_config()
+    del config["service"]["camera"]["capture_timeout"]
+
+    with pytest.raises(SystemExit, match="capture_timeout"):
+        main.read_settings(config)
+
+
+def test_nothing_the_loop_needs_is_read_after_startup():
+    """Every config read belongs in read_settings. A `require` left in the loop
+    is a config error that waits for a trigger to arrive."""
+    import ast
+
+    tree = ast.parse(Path(main.__file__).read_text(encoding="utf-8"))
+    main_def = next(
+        node for node in ast.walk(tree)
+        if isinstance(node, ast.FunctionDef) and node.name == "main")
+    offenders = [
+        node.lineno for node in ast.walk(main_def)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+        and node.func.id in ("require", "topic_named", "fill_placeholders")
+    ]
+    assert not offenders, (
+        "main() validates config outside read_settings, at line(s) "
+        + ", ".join(str(line) for line in offenders))
 
 
 # --- the loop ------------------------------------------------------------
@@ -292,6 +384,34 @@ def test_the_frame_thread_delivering_something_else_is_reported_not_published(ru
     assert state["published"] == []
 
 
+def test_configured_image_settings_are_applied_before_publishing(run_main, monkeypatch):
+    """`service.image` is what a deployment uses to fix a camera that reports
+    BGR where the rest of the pipeline expects RGB. Skipped silently, every
+    stored and inspected frame has its colours swapped and nothing errors."""
+    applied = []
+    monkeypatch.setattr(main, "apply_image_settings",
+                        lambda image, config: applied.append(config) or image)
+
+    config = make_config()
+    config["service"]["image"] = {"colour_format": "bgr_2_rgb"}
+
+    state = run_main(config)
+
+    assert applied == [{"colour_format": "bgr_2_rgb"}]
+    assert state["published"]
+
+
+def test_a_frame_is_left_alone_when_no_image_settings_are_configured(run_main, monkeypatch):
+    """`image: null` means publish exactly what the camera produced."""
+    applied = []
+    monkeypatch.setattr(main, "apply_image_settings",
+                        lambda image, config: applied.append(config) or image)
+
+    run_main(make_config())
+
+    assert applied == []
+
+
 def test_archiving_is_skipped_when_it_is_turned_off(run_main, monkeypatch):
     archived = []
     monkeypatch.setattr(main, "archive_image",
@@ -315,7 +435,7 @@ def test_archiving_names_the_file_after_the_camera(run_main, monkeypatch):
     assert len(archived) == 1
     _image, directory, filename, _params, camera_id = archived[0]
     assert directory == "save_dir"
-    assert filename.startswith("camcolour_1_opencv_")
+    assert filename.startswith("cam_colour_1_opencv_")
     assert camera_id == "colour_1"
 
 
@@ -404,38 +524,27 @@ def test_the_config_shipped_in_the_repo_satisfies_what_main_requires():
     it read `mqtt.*` and every config here was flat."""
     config = yaml.safe_load(CONFIG_EXAMPLE.read_text(encoding="utf-8"))
 
-    mqtt = main.require(config, "mqtt")
-    topics = main.require(mqtt, "topics")
-    service = main.require(config, "service")
-    camera = main.require(service, "camera")
-    main.require(service, "archiving")
-    main.require(main.require(service, "trigger"), "trigger_type")
-    main.require(camera, "camera_type")
-    main.require(camera, "camera_id")
-    main.require(camera, "capture_timeout_ms")
+    settings = main.read_settings(config)
 
-    for key in ("mqtt_ip", "mqtt_port"):
-        assert key in mqtt, f"{key} missing from the shipped config"
-    assert main.topic_named(topics, "trigger")
-    assert main.topic_named(topics, "image")
+    assert settings["broker_ip"]
+    assert settings["broker_port"]
+    assert settings["trigger_topic"] == "project/camera/colour_1/trigger"
+    assert settings["image_topic"] == "project/camera/colour_1/image"
+    assert settings["camera_type"] == "opencv"
 
 
 @pytest.mark.parametrize("example", sorted(
     (Path(__file__).resolve().parent.parent / "docs/config-examples").glob("*.yaml")),
     ids=lambda path: path.stem)
-def test_every_documented_example_satisfies_what_main_requires(example):
+def test_every_documented_example_is_one_main_could_run(example):
     """The per-camera examples are reference material, so nothing loads them and
-    nothing else would notice them drifting. Every one of them disagreed with
-    main.py before the conversion -- `trigger_type` in a section main never
-    read, and `archive_parameters` where the code wants `archive_params`."""
+    nothing else would notice them drifting."""
     config = yaml.safe_load(example.read_text(encoding="utf-8"))
 
-    mqtt = main.require(config, "mqtt")
-    service = main.require(config, "service")
-    main.require(main.require(service, "trigger"), "trigger_type")
-    main.require(main.require(service, "archiving"), "archive_params")
-    main.require(main.require(service, "camera"), "camera_type")
-    assert main.topic_named(main.require(mqtt, "topics"), "image")
+    settings = main.read_settings(config)
+
+    assert settings["image_topic"]
+    assert settings["camera_type"]
 
 
 def test_main_runs_the_config_it_is_given(tmp_path, monkeypatch):

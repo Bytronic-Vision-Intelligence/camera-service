@@ -25,6 +25,10 @@ mqtt:
   #             camera is triggered by software; an externally triggered
   #             camera delivers frames itself and nothing subscribes.
   #   image   - the encoded frame is published here.
+  #
+  # {camera_id} is filled in from service.camera.camera_id below, so one
+  # configuration serves any camera on the namespace. A placeholder nothing can
+  # fill is refused at startup rather than published literally.
   topics:
     - name: trigger
       topic: project/camera/{camera_id}/trigger
@@ -44,10 +48,8 @@ service:
     camera_id: colour_1
 
     # Milliseconds, handed to the vendor SDK's grab call. Cameras that grab on
-    # demand -- opencv and dummy -- ignore it. Was `capture_timout: 10` before
-    # the config was reshaped, which is 10ms: enough for a real Pylon or FLIR
-    # grab to time out on every trigger.
-    capture_timeout_ms: 5000
+    # demand -- opencv and dummy -- ignore it.
+    capture_timeout: 5000
 
     # camera_type: dummy replays images from a directory instead of opening
     # any hardware. Both keys are required when it is selected.
@@ -84,10 +86,20 @@ service:
   # camera_settings:
   #   pixel_format: BayerRG8
 
+  # What to do to the frame after it is captured, before it is published.
+  # Null or absent leaves it exactly as the camera produced it.
+  # image:
+  #   colour_format: bgr_2_rgb
+  image: null
+
+  # Reserved. Nothing reads this yet; it is here so a deployment that
+  # configures lighting has a place to put it.
+  lights: null
+
   archiving:
     is_archived: true
     archive_directory: save_dir
-    archive_params:
+    archive_parameters:
       archive_freq: daily
       archive_storage: 50       # GB
       archive_days: 30          # days

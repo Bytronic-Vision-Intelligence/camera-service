@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from dependencies.data_functions import (
+from dependencies.image_functions import (
     decode_image_from_bytes,
     encode_date_time_to_bytes,
     encode_image_to_bytes,

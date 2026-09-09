@@ -15,6 +15,12 @@ mqtt:
   mqtt_port: 1883
   qos: 1
 
+  # Written out in full, unlike the shipped config. build-binary.sh reads a
+  # topic straight out of this file to publish to, and it does not substitute
+  # `{camera_id}` -- it would publish to the literal template while the service
+  # subscribed to the filled-in one, and the check would fail for a reason that
+  # has nothing to do with the binary. What fills a placeholder is covered by
+  # the unit tests instead.
   topics:
     - name: trigger
       topic: project/camera/colour_1/trigger
@@ -29,7 +35,7 @@ service:
   camera:
     camera_type: dummy
     camera_id: colour_1
-    capture_timeout_ms: 5000
+    capture_timeout: 5000
     dummy_location: "/svc/frames"
     file_type: ".png"
 
@@ -39,7 +45,7 @@ service:
   archiving:
     is_archived: false
     archive_directory: save_dir
-    archive_params:
+    archive_parameters:
       archive_freq: daily
       archive_storage: 50
       archive_days: 30

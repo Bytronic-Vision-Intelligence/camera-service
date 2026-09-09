@@ -27,7 +27,7 @@ service:
     camera_ip: 192.168.2.10
     serial_number: "25165090"
     # Milliseconds, passed to buffer fetch.
-    capture_timeout_ms: 5000
+    capture_timeout: 5000
     # Path to a GenTL producer .cti. Unset, the known locations are searched.
     # gentl_cti: "/opt/vendor/producer.cti"
 
@@ -45,7 +45,7 @@ service:
   archiving:
     is_archived: true
     archive_directory: "save_dir"
-    archive_params:
+    archive_parameters:
       archive_freq: "daily"
       archive_storage: 50       # GB
       archive_days: 30          # days

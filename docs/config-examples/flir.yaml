@@ -30,7 +30,7 @@ service:
     camera_id: 1
     serial_number: "73400462"
     # Milliseconds, passed to GetNextImage.
-    capture_timeout_ms: 5000
+    capture_timeout: 5000
 
   camera_settings:
     buffer_size: 0
@@ -52,7 +52,7 @@ service:
   archiving:
     is_archived: true
     archive_directory: "../save_dir"
-    archive_params:
+    archive_parameters:
       archive_freq: "hourly"
       archive_storage: 50       # GB
       archive_days: 30          # days

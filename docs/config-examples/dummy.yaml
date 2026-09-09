@@ -29,7 +29,7 @@ service:
     dummy_location: "./test"
     file_type: ".png"
     # Ignored: the dummy reads from disk.
-    capture_timeout_ms: 5000
+    capture_timeout: 5000
 
   trigger:
     trigger_type: software
@@ -37,7 +37,7 @@ service:
   archiving:
     is_archived: true
     archive_directory: "save_dir"
-    archive_params:
+    archive_parameters:
       archive_freq: "daily"
       archive_storage: 50       # GB
       archive_days: 30          # days

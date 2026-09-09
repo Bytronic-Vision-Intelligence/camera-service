@@ -1,5 +1,5 @@
 from .cameras import *
-from dependencies.data_functions import encode_image_to_bytes
+from dependencies.image_functions import encode_image_to_bytes
 from base64 import b64encode
 
 class CameraHandler():

@@ -1,5 +1,5 @@
 from numpy import frombuffer, ndarray, uint8
-from cv2 import imencode, imdecode, normalize, IMREAD_UNCHANGED, NORM_MINMAX, CV_8U
+import cv2
 from time import localtime, strftime
 
 
@@ -16,7 +16,7 @@ def prepare_image_for_jpeg(image: ndarray) -> ndarray:
 
     if img.dtype != uint8:
         # Mono16 / float etc. → uint8 without expanding to BGR
-        img = normalize(img, None, 0, 255, NORM_MINMAX, dtype=CV_8U)
+        img = cv2.normalize(img, None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U)
     return img
 
 
@@ -24,7 +24,7 @@ def encode_image_to_bytes(image: ndarray) -> bytes:
     """Encode the image as JPEG and return the bytes."""
     img = prepare_image_for_jpeg(image)
 
-    success, encoded_image = imencode(".jpg", img)
+    success, encoded_image = cv2.imencode(".jpg", img)
 
     if not success:
         raise RuntimeError("Failed to encode image to JPEG format.")
@@ -46,7 +46,16 @@ def decode_image_from_bytes(data: bytes) -> ndarray:
     if not data:
         raise ValueError("Empty image bytes.")
 
-    image = imdecode(frombuffer(data, uint8), IMREAD_UNCHANGED)
+    image = cv2.imdecode(frombuffer(data, uint8), cv2.IMREAD_UNCHANGED)
     if image is None:
         raise ValueError("Could not decode image bytes.")
     return image
+
+
+def apply_image_settings(image, image_config):
+    colour_format = image_config.get("colour_format", None)
+    if colour_format:
+        if colour_format == "bgr_2_rgb":
+            image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+    return image
+        
