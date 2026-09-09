@@ -53,6 +53,14 @@ for dir in "$BUILD_DIR"/build-*; do
     [ -f "$candidate" ] && chmod +x "$candidate"
   done
 
+  # And anything else meant to be run. A service that ships an installer
+  # alongside its binary loses ITS executable bit to the same artifact upload,
+  # and the customer finds a script they cannot run for the same reason they
+  # once found a binary they could not.
+  for script in "$dir"/*.sh; do
+    [ -f "$script" ] && chmod +x "$script"
+  done
+
   ( cd "$dir" && zip -qr "${OUT_DIR}/${SERVICE}-${platform}.zip" . )
   found=$((found + 1))
 done
