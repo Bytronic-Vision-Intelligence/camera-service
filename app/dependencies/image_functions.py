@@ -100,8 +100,27 @@ def _colormap_code(name: str) -> int:
     raise ValueError(f"Unsupported colourmap: {name!r}")
 
 
-def _to_grayscale_uint8(image: np.ndarray) -> np.ndarray:
-    """Collapse to single-channel uint8."""
+def _parse_norm_range(norm_range) -> tuple[float, float] | None:
+    """Validate optional ``norm_range: [min, max]`` for fixed colormap scaling."""
+    if norm_range is None:
+        return None
+    if not isinstance(norm_range, (list, tuple)) or len(norm_range) != 2:
+        raise ValueError(f"norm_range must be [min, max], got {norm_range!r}")
+    vmin, vmax = float(norm_range[0]), float(norm_range[1])
+    if not np.isfinite(vmin) or not np.isfinite(vmax) or vmax <= vmin:
+        raise ValueError(f"norm_range max must be > min, got {norm_range!r}")
+    return vmin, vmax
+
+
+def _to_grayscale_uint8(
+    image: np.ndarray,
+    norm_range: tuple[float, float] | list | None = None,
+) -> np.ndarray:
+    """Collapse to single-channel uint8.
+
+    When ``norm_range`` is set, scale that fixed DN window to 0–255 (values
+    outside are clipped). Otherwise use per-frame min/max normalisation.
+    """
     img = image
     if img.ndim == 3:
         if img.shape[2] == 1:
@@ -109,7 +128,13 @@ def _to_grayscale_uint8(image: np.ndarray) -> np.ndarray:
         else:
             img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     if img.dtype != np.uint8:
-        img = cv2.normalize(img, None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U)
+        parsed = _parse_norm_range(norm_range)
+        if parsed is not None:
+            vmin, vmax = parsed
+            scaled = (img.astype(np.float32) - vmin) * (255.0 / (vmax - vmin))
+            img = np.clip(scaled, 0, 255).astype(np.uint8)
+        else:
+            img = cv2.normalize(img, None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U)
     return img
 
 
@@ -189,7 +214,7 @@ def apply_image_format(image: np.ndarray, output_settings) -> np.ndarray:
 
     if "colourmap" in image_format:
         return cv2.applyColorMap(
-            _to_grayscale_uint8(image),
+            _to_grayscale_uint8(image, norm_range=image_format.get("norm_range")),
             _colormap_code(image_format["colourmap"]),
         )
 
