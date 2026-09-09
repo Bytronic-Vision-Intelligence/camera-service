@@ -14,8 +14,8 @@ Topics may carry `{camera_id}`, filled in from this service's own settings, so
 one configuration serves any camera on the namespace.
 
 Its own settings -- which camera, how it triggers, what to do to the frame,
-whether it is archived -- live under `service`, and the vendor drivers read
-them from there through dependencies.service_settings.
+whether it is archived -- live under `service`, and each vendor driver is
+handed that section when it is built.
 """
 
 import base64
@@ -170,6 +170,9 @@ def read_settings(config: dict) -> dict:
         "trigger_topic": (None if is_external_trigger
                           else topic_named(topics, "trigger", placeholders)),
         "is_external_trigger": is_external_trigger,
+        # The whole section, because a driver reads `camera`,
+        # `camera_settings` and `trigger` from it.
+        "service_config": service_config,
         "camera_config": camera_config,
         "camera_id": camera_id,
         "camera_type": require(camera_config, "camera_type"),
@@ -183,40 +186,48 @@ def read_settings(config: dict) -> dict:
     }
 
 
-def set_camera_class(camera_type: str, config: dict):
+def set_camera_class(camera_type: str, settings: dict):
     """Construct and connect the driver for `camera_type`.
 
     Every driver but opencv is imported lazily: they need vendor SDKs that are
     not installed on a machine running a different camera, and a module-level
     import would stop the service starting at all.
 
+    Each driver is HANDED its settings rather than reading them. A driver that
+    reaches for a process-global config can only be exercised with a config
+    file on disk -- which is why the vendor drivers had no tests at all -- and
+    cannot be told about two cameras in one process.
+
     Args:
         camera_type: the `service.camera.camera_type` value.
-        config: the `service.camera` section, for the settings a driver needs
-            before it can be built.
+        settings: the whole `service:` section. Drivers read `camera`,
+            `camera_settings` and `trigger` from within it.
     Raises:
         ValueError: when the type is empty or not one this service supports.
     """
     if not camera_type:
         raise ValueError("Camera type cannot be empty.")
 
+    camera_settings = settings.get("camera") or {}
+
     if camera_type == "opencv":
         camera = Camera()
     elif camera_type == "dummy":
         from dependencies.CameraLibrary.cameras_dummy import DummyCamera
-        camera = DummyCamera(require(config, "dummy_location"), require(config, "file_type"))
+        camera = DummyCamera(require(camera_settings, "dummy_location"),
+                             require(camera_settings, "file_type"))
     elif camera_type == "pylon":
         from dependencies.CameraLibrary.cameras_pylon import PylonCamera
-        camera = PylonCamera()
+        camera = PylonCamera(settings)
     elif camera_type == "gige":
         from dependencies.CameraLibrary.cameras_gige import GigeCamera
-        camera = GigeCamera()
+        camera = GigeCamera(settings)
     elif camera_type == "flir":
         from dependencies.CameraLibrary.cameras_flir import FlirCamera
-        camera = FlirCamera()
+        camera = FlirCamera(settings)
     elif camera_type == "ljs":
         from dependencies.CameraLibrary.cameras_ljs import LJSCamera
-        camera = LJSCamera()
+        camera = LJSCamera(settings)
     else:
         raise ValueError(f"Unsupported camera type: {camera_type}")
 
@@ -321,7 +332,7 @@ def main(argv=None) -> int:
     image_topic = settings["image_topic"]
     image_config = settings["image_config"]
 
-    camera = set_camera_class(settings["camera_type"], settings["camera_config"])
+    camera = set_camera_class(settings["camera_type"], settings["service_config"])
     client = MQTTClient(MQTTConfig(host=settings["broker_ip"], port=settings["broker_port"]))
     client.connect()
 

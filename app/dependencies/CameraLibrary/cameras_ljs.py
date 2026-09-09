@@ -18,7 +18,6 @@ from typing import Any, Optional
 
 import numpy as np
 
-from dependencies import service_settings
 
 from . import settings_ljs
 from .cameras import CameraHeightMap
@@ -116,9 +115,20 @@ class LJSCamera(CameraHeightMap):
     use_image_filter, interpolate_y, settings).
     """
 
-    def __init__(self, **overrides: Any) -> None:
+    def __init__(self, settings: dict | None = None, **overrides: Any) -> None:
+        """
+        Args:
+            settings: the service's own `service:` section; the head's own
+                settings are read from `camera.ljs` within it.
+            overrides: individual settings, for a caller driving the head
+                directly rather than through a service configuration.
+        """
         super().__init__()
-        cfg = dict(service_settings.get_section("camera").get("ljs") or {})
+        # Not stored: `self.settings` on this class already means the LJ-S
+        # program settings, assigned at the end of this method. Keeping the
+        # service section here too would have one attribute mean two things,
+        # and the second assignment silently wins.
+        cfg = dict(((settings or {}).get("camera") or {}).get("ljs") or {})
         cfg.update(overrides)
 
         self.host = str(cfg.get("host", "192.168.0.1"))

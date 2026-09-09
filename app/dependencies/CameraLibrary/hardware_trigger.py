@@ -15,7 +15,6 @@ from typing import Callable, Optional
 
 import numpy as np
 
-from dependencies import service_settings
 
 logger = logging.getLogger(__name__)
 
@@ -68,9 +67,14 @@ class HardwareTriggerConfig:
     poll_interval_s: float = 0.001
 
     @classmethod
-    def from_app_config(cls, cfg: Optional[dict] = None) -> "HardwareTriggerConfig":
-        if cfg is None:
-            cfg = service_settings.get_section("trigger")
+    def from_trigger_settings(cls, cfg: dict) -> "HardwareTriggerConfig":
+        """Build from the `service.trigger` section.
+
+        Args:
+            cfg: the trigger settings. Required: this used to fall back to
+                reading the process-global config, which meant the caller could
+                not tell whether it had configured the trigger or not.
+        """
         trigger_type = str(cfg.get("trigger_type", "")).lower()
         return cls(
             enabled=trigger_type == "external",
