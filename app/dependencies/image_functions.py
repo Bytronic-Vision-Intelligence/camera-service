@@ -59,6 +59,31 @@ def decode_image_from_bytes(data: bytes) -> np.ndarray:
     return image
 
 
+def _rotation_code(degrees) -> int:
+    """Map degrees to a ``cv2.ROTATE_*`` code (90 / -90 / 180 / 270)."""
+    angle = int(degrees)
+    if angle == 180:
+        return cv2.ROTATE_180
+    if angle == 90:
+        return cv2.ROTATE_90_CLOCKWISE
+    if angle == 270 or angle == -90:
+        return cv2.ROTATE_90_COUNTERCLOCKWISE
+    raise ValueError(f"Unsupported rotate: {degrees!r} (use 90, -90, 180, or 270)")
+
+
+def _apply_crop(image: np.ndarray, crop) -> np.ndarray:
+    """Crop with fractional ``x`` / ``y`` ranges, e.g. ``[{x: [0.15, 0.85]}]``."""
+    h, w = image.shape[:2]
+    x0, x1, y0, y1 = 0, w, 0, h
+    for item in crop:
+        axis, (start, end) = next(iter(item.items()))
+        if axis == "x":
+            x0, x1 = int(start * w), int(end * w)
+        elif axis == "y":
+            y0, y1 = int(start * h), int(end * h)
+    return image[y0:y1, x0:x1]
+
+
 def _color_conversion_code(name: str) -> int:
     attr = f"COLOR_{str(name).strip()}"
     if hasattr(cv2, attr):
@@ -134,8 +159,18 @@ def _apply_mono_format(image: np.ndarray, name: str) -> np.ndarray:
     raise ValueError(f"Unsupported mono image_format: {name!r}")
 
 
-def apply_image_format(image: np.ndarray, image_format) -> np.ndarray:
-    """Apply a single ``images.*.image_format`` transform. ``None`` keeps the frame raw."""
+def apply_image_format(image: np.ndarray, output_settings) -> np.ndarray:
+    """Apply rotate, crop, then ``image_format``. ``None`` format keeps raw pixels."""
+    if not isinstance(output_settings, dict):
+        raise ValueError("output_settings must be a mapping")
+
+    if output_settings.get("rotate") is not None:
+        image = cv2.rotate(image, _rotation_code(output_settings["rotate"]))
+
+    if output_settings.get("crop") is not None:
+        image = _apply_crop(image, output_settings["crop"])
+
+    image_format = output_settings.get("image_format")
     if image_format is None:
         return image
 
@@ -191,6 +226,8 @@ def parse_image_outputs(images_config) -> list[dict]:
             {
                 "id": str(image_id),
                 "image_format": spec.get("image_format"),
+                "rotate": spec.get("rotate"),
+                "crop": spec.get("crop"),
                 "topic_end": spec.get("topic_end"),
                 "archive": bool(spec.get("archive", False)),
             }
@@ -206,6 +243,8 @@ def resolve_image_outputs(config: dict) -> list[dict]:
         {
             "id": "default",
             "image_format": None,
+            "rotate": None,
+            "crop": None,
             "topic_end": None,
             "archive": True,
         }

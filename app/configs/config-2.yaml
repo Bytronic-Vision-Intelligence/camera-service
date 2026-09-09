@@ -2,20 +2,20 @@ mqtt:
   ip: localhost
   port: 1883
   qos: 1
-  trigger_topic: churchill/camera/colour/trigger
-  image_topic: churchill/camera/colour/image
+  trigger_topic: churchill/camera/depth/trigger
+  image_topic: churchill/camera/depth/image
 camera:
   camera_type: dummy
-  camera_id: colour
-  dummy_location: ../data/dummy_camera/churchill/colour/4
-  file_type: bmp
+  camera_id: depth
+  dummy_location: ../data/dummy_camera/churchill/depth
+  file_type: png
   capture_timeout: 10
 trigger:
   trigger_type: software
 lights: null
 archiving:
   is_archived: 'true'
-  archive_directory: ../data/images
+  archive_directory: ../data
   archive_parameters:
     archive_freq: daily
     archive_storage: 50

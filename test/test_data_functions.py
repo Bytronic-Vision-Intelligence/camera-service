@@ -81,12 +81,25 @@ def test_parse_image_outputs_reads_ids_and_flags():
                     "archive": False,
                 }
             },
+            {
+                "rgb": {
+                    "rotate": -90,
+                    "crop": [{"x": [0.15, 0.85]}],
+                    "image_format": {"channel": "BGR2RGB"},
+                    "topic_end": None,
+                    "archive": True,
+                }
+            },
         ]
     )
 
     assert outputs[0]["id"] == "raw"
     assert outputs[0]["archive"] is True
+    assert outputs[0]["rotate"] is None
+    assert outputs[0]["crop"] is None
     assert outputs[1]["topic_end"] == "colourmap"
+    assert outputs[2]["rotate"] == -90
+    assert outputs[2]["crop"] == [{"x": [0.15, 0.85]}]
 
 
 def test_build_image_topic_appends_topic_end():
@@ -102,18 +115,18 @@ def test_apply_image_format_channel_and_colourmap():
     img = np.zeros((2, 2, 3), dtype=np.uint8)
     img[:, :, 0] = 255
 
-    rgb = apply_image_format(img, {"channel": "BGR2RGB"})
+    rgb = apply_image_format(img, {"image_format": {"channel": "BGR2RGB"}})
     assert rgb[0, 0, 2] == 255
 
     thermal = np.array([[0, 32768], [65535, 16384]], dtype=np.uint16)
-    coloured = apply_image_format(thermal, {"colourmap": "JET"})
+    coloured = apply_image_format(thermal, {"image_format": {"colourmap": "JET"}})
     assert coloured.shape == (2, 2, 3)
 
 
 def test_apply_image_format_mono14_masks_to_bit_depth():
     img = np.array([[0, 4096], [8192, 65535]], dtype=np.uint16)
 
-    out = apply_image_format(img, "Mono14")
+    out = apply_image_format(img, {"image_format": "Mono14"})
 
     assert out.shape == (2, 2)
     assert out.dtype == np.uint16
@@ -123,7 +136,7 @@ def test_apply_image_format_mono14_masks_to_bit_depth():
 def test_apply_image_format_uint8_normalises_mono16():
     img = np.array([[0, 32768], [65535, 0]], dtype=np.uint16)
 
-    out = apply_image_format(img, "uint8")
+    out = apply_image_format(img, {"image_format": "uint8"})
 
     assert out.dtype == np.uint8
     assert out.max() == 255
@@ -132,16 +145,35 @@ def test_apply_image_format_uint8_normalises_mono16():
 def test_apply_image_format_uint16_keeps_full_range():
     img = np.array([[0, 65535]], dtype=np.uint16)
 
-    out = apply_image_format(img, "uint16")
+    out = apply_image_format(img, {"image_format": "uint16"})
 
     assert out.dtype == np.uint16
     assert out[0, 1] == 65535
 
 
+def test_apply_image_format_rotate_and_crop():
+    # Distinct pixel so rotate/crop orientation is easy to check.
+    img = np.arange(100, dtype=np.uint8).reshape(10, 10)
+
+    rotated = apply_image_format(img, {"rotate": -90})
+    assert rotated.shape == (10, 10)
+    assert rotated[0, 0] == img[0, 9]
+
+    cropped = apply_image_format(img, {"crop": [{"x": [0.2, 0.8]}]})
+    assert cropped.shape == (10, 6)
+    assert np.array_equal(cropped, img[:, 2:8])
+
+    both = apply_image_format(
+        img,
+        {"rotate": 90, "crop": [{"y": [0.0, 0.5]}]},
+    )
+    assert both.shape == (5, 10)
+
+
 def test_encode_uint16_round_trip_as_png():
     img = apply_image_format(
         np.array([[0, 16383], [100, 200]], dtype=np.uint16),
-        "Mono14",
+        {"image_format": "Mono14"},
     )
 
     out = decode_image_from_bytes(encode_image_to_bytes(img))
@@ -151,7 +183,7 @@ def test_encode_uint16_round_trip_as_png():
 
 
 def test_image_encoding_reports_png_for_uint16():
-    img = apply_image_format(np.zeros((4, 4), dtype=np.uint16), "Mono14")
+    img = apply_image_format(np.zeros((4, 4), dtype=np.uint16), {"image_format": "Mono14"})
 
     assert image_encoding(img) == "png"
 
@@ -161,3 +193,5 @@ def test_resolve_image_outputs_defaults_without_images_key():
 
     assert len(outputs) == 1
     assert outputs[0]["id"] == "default"
+    assert outputs[0]["rotate"] is None
+    assert outputs[0]["crop"] is None

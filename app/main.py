@@ -194,7 +194,7 @@ def main(config_path: str | None = None) -> int:
             timestamp = time.strftime("%Y%m%d_%H%M%S")
             for output in image_outputs:
                 try:
-                    variant = apply_image_format(image, output["image_format"])
+                    variant = apply_image_format(image, output)
                 except Exception as e:
                     logging.error(
                         "Failed to apply image_format for image %s: %s",
