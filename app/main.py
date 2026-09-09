@@ -44,37 +44,30 @@ from dependencies.mqtt_functions import start_subscribe_thread
 EXTERNAL_TRIGGERS = ("external", "hardware")
 
 
-def in_the_config() -> str:
-    """" in <the config file>", or "" when none has been resolved.
-
-    Named only if one has been loaded. These checks also run in contexts that
-    never parsed arguments -- tests, and anything importing main -- and
-    config_path() refuses to guess there, which would replace a message about
-    the missing key with one about the wrong problem entirely.
-    """
-    try:
-        return f" in {loadConfig.config_path()}"
-    except SystemExit:
-        return ""
-
-
 def require(config: dict, key: str):
-    """Return a required config value, or exit describing what is missing.
+    """Return a required top-level config value, or exit describing what is missing.
 
     Args:
-        config: the mapping the key should be in.
-        key: the key the service cannot start without.
+        config: the loaded configuration mapping.
+        key: the top-level key the service cannot start without.
     Returns:
         the value stored under `key`.
     Raises:
-        SystemExit: when `key` is absent or empty, naming both the key and the
-            file it is missing from.
+        SystemExit: when `key` is absent, naming both the key and the file.
     """
-    # `is None` as well as absent: a key written and left blank is a section
+    # `is None` as well as absent: a key present but empty is a section
     # somebody meant to fill in, and letting it through moves the failure to
     # whatever first subscripts it.
     if key not in config or config[key] is None:
-        raise SystemExit(f"Missing required config key '{key}'{in_the_config()}")
+        # Named only if one has been loaded. require() is also called on
+        # nested sections in contexts that never parsed arguments, and
+        # config_path() refuses to guess there -- which would replace this
+        # message with one about the wrong problem entirely.
+        try:
+            where = f" in {loadConfig.config_path()}"
+        except SystemExit:
+            where = ""
+        raise SystemExit(f"Missing required config key '{key}'{where}")
     return config[key]
 
 
@@ -96,10 +89,10 @@ def fill_placeholders(topic: str, values: dict) -> str:
         return topic.format_map(values)
     except KeyError as missing:
         raise SystemExit(
-            f"Topic {topic!r} uses {missing} and nothing supplies it"
-            f"{in_the_config()}. Available: {', '.join(sorted(values))}.")
+            f"Topic {topic!r} uses {missing} and nothing supplies it. "
+            f"Available: {', '.join(sorted(values))}.")
     except (IndexError, ValueError) as exc:
-        raise SystemExit(f"Topic {topic!r} is not a valid template{in_the_config()}: {exc}")
+        raise SystemExit(f"Topic {topic!r} is not a valid template: {exc}")
 
 
 def topic_named(topics: list, name: str, values: dict | None = None) -> str:
@@ -124,10 +117,10 @@ def topic_named(topics: list, name: str, values: dict | None = None) -> str:
         value = topic.get("topic")
         if not value:
             raise SystemExit(
-                f"Topic '{name}' has no `topic:` value{in_the_config()}")
+                f"Topic '{name}' has no `topic:` value")
         return fill_placeholders(str(value), values or {})
     raise SystemExit(
-        f"No topic named '{name}'{in_the_config()}. camera-service looks its "
+        f"No topic named '{name}'. camera-service looks its "
         f"topics up by name; add `- name: {name}` under mqtt.topics.")
 
 
