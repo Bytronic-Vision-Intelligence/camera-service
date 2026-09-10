@@ -15,6 +15,10 @@ venv/
 # Captured and archived imagery
 *.png
 *.jpg
+# ...except the frames the end-to-end check replays. camera_type: dummy needs
+# a file to read, and the check runs from a clean copy of the TRACKED tree, so
+# an ignored frame is simply not there when it runs.
+!docker-local/e2e-assets/**/*.png
 *archive
 save_dir/
 persist.json
@@ -23,13 +27,6 @@ persist.json
 junit/
 .pytest_cache/
 .ruff_cache/
-docs/superpowers/
-.vscode/
-.idea/
-.claude/
-.DS_Store
-
-*.log
 
 # act run byproducts (docker-local/run.sh)
 docker-local/logs/
@@ -45,3 +42,16 @@ docker-local/.release-check/
 # test/test_release_pipeline.py::test_the_release_output_paths_are_gitignored
 dist/
 upload/
+
+# Working notes, not for the remote
+docs/superpowers/
+
+# Editors / OS
+.vscode/
+.idea/
+.claude/
+CLAUDE.md
+.DS_Store
+
+# Logs
+*.log

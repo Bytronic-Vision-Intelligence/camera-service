@@ -1,9 +1,7 @@
 # Builds a signed, per-platform release of this service.
 #
-# Rename `name:` below when you clone this template into a new service. Nothing
-# else in this file needs editing: the artefact names come from the repository
-# name, so the four lines that differed between the first two hand-copied
-# pipelines cannot drift here.
+# The artefact names come from the repository name, so the four lines that
+# differed between the first two hand-copied pipelines cannot drift here.
 #
 # TRIGGER: pushes to `prod`, and nothing else.
 #
@@ -76,7 +74,7 @@ jobs:
           test -f app/main.py
           test -f requirements.txt
           test -d app/dependencies
-          test -f config.yaml
+          test -f config.example.yaml
           echo "Layout looks like a Bytronic service."
 
       # Pinned to a commit rather than @master: this action turns source into
@@ -115,8 +113,10 @@ jobs:
           output_dir="./dist/${{ matrix.platform }}"
           # Beside the executable, which is exactly where the service reads
           # it from. The orchestrator overwrites it on deployment; this copy is
-          # the documented starting point.
-          cp config.yaml "$output_dir/config.yaml"
+          # the documented starting point. It is tracked as config.example.yaml
+          # so that the config.yaml the orchestrator writes into a checkout can
+          # stay ignored -- this repository is public.
+          cp config.example.yaml "$output_dir/config.yaml"
 
       - name: Verify build output
         run: |

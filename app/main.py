@@ -1,5 +1,6 @@
 import base64
 import json
+import signal
 import time
 from json import JSONDecodeError
 from logging import critical, debug, error, info
@@ -36,12 +37,40 @@ def require(config: dict, key: str):
     return config[key]
 
 
-def topic_by_name(topics: list, name: str) -> str:
-    """Return the topic string for a named topic entry."""
+def fill_placeholders(topic: str, values: dict) -> str:
+    """Substitute ``{camera_id}`` and friends into a configured topic."""
+    try:
+        return topic.format_map(values)
+    except KeyError as missing:
+        raise SystemExit(
+            f"Topic {topic!r} uses {missing} and nothing supplies it. "
+            f"Available: {', '.join(sorted(values))}."
+        )
+    except (IndexError, ValueError) as exc:
+        raise SystemExit(f"Topic {topic!r} is not a valid template: {exc}")
+
+
+def topic_named(topics: list, name: str, values: dict | None = None) -> str:
+    """Return the topic string declared under ``name``, placeholders filled in."""
     for topic in topics:
-        if topic.get("name") == name:
-            return topic["topic"]
-    raise SystemExit(f"Missing required topic name '{name}'")
+        if topic.get("name") != name:
+            continue
+        value = topic.get("topic")
+        if not value:
+            raise SystemExit(f"Topic '{name}' has no `topic:` value")
+        return fill_placeholders(str(value), values or {})
+    raise SystemExit(
+        f"No topic named '{name}'. camera-service looks its "
+        f"topics up by name; add `- name: {name}` under mqtt.topics."
+    )
+
+
+def apply_topic_placeholders(topics: list, values: dict) -> None:
+    """Fill placeholders on every configured topic string in place."""
+    for entry in topics:
+        value = entry.get("topic")
+        if value:
+            entry["topic"] = fill_placeholders(str(value), values)
 
 
 def set_camera_class(
@@ -452,7 +481,7 @@ def run_hardware_path(
     return threads
 
 
-def main(argv=None) -> None:
+def main(argv=None) -> int:
     args = loadConfig.parse_cli(argv)
     config = loadConfig.get_config(args.config)
 
@@ -469,7 +498,13 @@ def main(argv=None) -> None:
     camera_settings = service.get("camera_settings") or {}
     lights_config = service.get("lights") or {}
     image_outputs = resolve_image_outputs(service)
-    base_image_topic = topic_by_name(topics, "image")
+
+    placeholders = {
+        "camera_id": require(camera_config, "camera_id"),
+        "project": config.get("project", "project"),
+    }
+    apply_topic_placeholders(topics, placeholders)
+    base_image_topic = topic_named(topics, "image", placeholders)
 
     trigger_type = str(require(trigger_config, "trigger_type")).strip().lower()
     capture_type = str(require(trigger_config, "capture_type")).strip().lower()
@@ -501,6 +536,14 @@ def main(argv=None) -> None:
 
     stop_event = Event()
     threads: list = []
+    exit_code = 0
+
+    def _request_shutdown(signum, _frame):
+        info("Received signal %s; requesting shutdown.", signum)
+        stop_event.set()
+
+    signal.signal(signal.SIGINT, _request_shutdown)
+    signal.signal(signal.SIGTERM, _request_shutdown)
 
     try:
         if trigger_type == "software" and capture_type == "single":
@@ -535,6 +578,8 @@ def main(argv=None) -> None:
 
         camera.disconnect_camera(camera.cam)
 
+    return exit_code
+
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

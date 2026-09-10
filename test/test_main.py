@@ -92,8 +92,18 @@ def test_require_exits_naming_the_missing_key():
         main.require({}, "mqtt")
 
 
-def test_topic_by_name_returns_image_base():
-    assert main.topic_by_name(make_topics(), "image") == "project/camera/colour/image"
+def test_topic_named_returns_image_base():
+    assert main.topic_named(make_topics(), "image") == "project/camera/colour/image"
+
+
+def test_topic_named_fills_placeholders():
+    topics = [
+        {"name": "image", "topic": "{project}/camera/{camera_id}/image"},
+    ]
+    assert (
+        main.topic_named(topics, "image", {"project": "plant", "camera_id": "cam1"})
+        == "plant/camera/cam1/image"
+    )
 
 
 def test_set_camera_class_injects_config(tmp_path):

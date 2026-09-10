@@ -1,0 +1,70 @@
+# gige: a GenICam camera through harvesters.
+#
+# Reference only -- nothing loads this file. See ../../config.example.yaml for
+# the annotated shape.
+
+project: indonesia
+
+mqtt:
+  mqtt_ip: localhost
+  mqtt_port: 1883
+  qos: 1
+
+  # {project} / {camera_id} are filled from project / service.camera at startup.
+  topics:
+    - name: trigger
+      topic: "{project}/camera/{camera_id}/trigger"
+      is_subscribe: true
+      is_trigger: true
+
+    - name: image
+      topic: "{project}/camera/{camera_id}/image"
+      is_subscribe: false
+
+service:
+  camera:
+    camera_type: gige
+    camera_id: 1
+    camera_ip: 192.168.2.10
+    serial_number: "25165090"
+    # Milliseconds, passed to buffer fetch.
+    capture_timeout: 5000
+    # Path to a GenTL producer .cti. Unset, the known locations are searched.
+    # cti_path: "/opt/vendor/producer.cti"
+    # gentl_cti is a legacy alias for cti_path.
+
+  camera_settings:
+    pixel_format: BayerRG8
+
+  # trigger_type: software | hardware
+  # capture_type: single | continuous
+  #
+  # software + single     → MQTT trigger → GenICam TriggerSoftware → one frame
+  # software + continuous → MQTT on/off arms a timed capture stream
+  # hardware + single     → line trigger, frame thread → one frame
+  # hardware + continuous → TriggerMode off; free-run stream
+  #
+  # (Legacy: continuous as trigger_type → software + continuous, or
+  #  hardware + continuous when free-run was intended)
+  trigger:
+    trigger_type: software
+    capture_type: single
+
+  images:
+    - default:
+        image_format: null
+        topic_end: null
+        archive: true
+
+  lights: {}
+
+  archiving:
+    is_archived: true
+    archive_directory: "save_dir"
+    archive_parameters:
+      archive_freq: "daily"
+      archive_storage: 50       # GB
+      archive_days: 30          # days
+
+logging:
+  level: INFO

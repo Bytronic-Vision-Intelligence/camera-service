@@ -123,9 +123,6 @@ def test_no_runtime_code_reports_through_print():
     for path in sorted(app.rglob("*.py")):
         if "__pycache__" in path.parts:
             continue
-        # Bootstrap / install helper — not the service runtime under the orchestrator.
-        if path.name == "setup.py":
-            continue
         tree = ast.parse(path.read_text(), filename=str(path))
         for node in ast.walk(tree):
             if (isinstance(node, ast.Call)

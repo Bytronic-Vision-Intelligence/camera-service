@@ -1,8 +1,16 @@
-# The shape of a service's configuration.
+# camera-service: capture a frame on a trigger and publish it.
 #
-# Tracked example / starting point. service-orchestrator overwrites the live
-# config.yaml beside the binary from its own config (single source of truth).
+# This is the documented SHAPE of a camera-service configuration, and the copy
+# that ships beside the binary in a release. It is not deployment config:
+# service-orchestrator writes the real one and launches the binary pointed at
+# it with --config, so one binary can serve several cameras.
+#
+# Tracked as config.example.yaml, never as config.yaml. The orchestrator writes
+# config.yaml into this directory and this repository is PUBLIC, so a tracked
+# config.yaml would leave a customer's brokers and topics one `git add -A` away
+# from being published.
 
+# Topic namespace for this installation.
 project: project
 
 mqtt:
@@ -12,13 +20,14 @@ mqtt:
 
   # trigger: MQTT software subscribe+trigger (single) or on/off (continuous)
   # image: publish base; outputs append topic_end (e.g. /raw, /colourmap)
+  # {camera_id} / {project} are filled from service.camera / project at startup.
   topics:
     - name: trigger
-      topic: project/camera/ID/trigger
+      topic: "{project}/camera/{camera_id}/trigger"
       is_subscribe: true
       is_trigger: true
     - name: image
-      topic: project/camera/ID/image
+      topic: "{project}/camera/{camera_id}/image"
       is_subscribe: false
 
 service:

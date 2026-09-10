@@ -39,3 +39,36 @@ class FakeThread:
     def join(self, timeout=None):
         self.join_called = True
         self.alive = False
+
+
+class FakeCamera:
+    """A camera driver that captures without hardware.
+
+    Records what it was asked for, so a test can tell a capture that happened
+    from one that was skipped.
+    """
+
+    def __init__(self, frame=None, capture_error=None):
+        self.cam = object()
+        self.frame = frame
+        self.capture_error = capture_error
+        self.connected = False
+        self.disconnected = False
+        self.captures = []
+        # Match injected attributes used by set_camera_class / backends.
+        self.camera_config = {}
+        self.trigger_config = {}
+        self.camera_settings = {}
+        self.lights_config = {}
+
+    def connect_to_camera(self):
+        self.connected = True
+
+    def capture_image(self, timeout_ms=None):
+        self.captures.append(timeout_ms)
+        if self.capture_error is not None:
+            raise self.capture_error
+        return self.frame
+
+    def disconnect_camera(self, camera=None):
+        self.disconnected = True

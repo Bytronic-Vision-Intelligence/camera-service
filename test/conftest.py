@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
-SHAPE_CONFIG = ROOT / "config.yaml"
+SHAPE_CONFIG = ROOT / "config.example.yaml"
 
 
 @pytest.fixture(autouse=True)
@@ -19,6 +19,20 @@ def use_local_config(monkeypatch):
         "sys.argv",
         ["pytest", "--config", str(SHAPE_CONFIG)],
     )
+
+
+@pytest.fixture(autouse=True)
+def _forget_the_resolved_config():
+    """Clear the config path this process resolved.
+
+    loadConfig keeps it in a module global so that later reads cannot drift
+    onto a different file. Left set between tests, a test that never named a
+    config silently reads whichever one the previous test did.
+    """
+    from dependencies import loadConfig
+    loadConfig._ACTIVE = None
+    yield
+    loadConfig._ACTIVE = None
 
 
 @pytest.fixture(autouse=True)
