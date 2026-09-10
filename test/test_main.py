@@ -171,8 +171,9 @@ def test_the_config_shipped_in_the_repo_satisfies_what_main_requires():
     import yaml
     from pathlib import Path
 
+    # Tracked shape is config.example.yaml — config.yaml is local/orchestrator only.
     config = yaml.safe_load(
-        (Path(__file__).resolve().parent.parent / "config.yaml").read_text()
+        (Path(__file__).resolve().parent.parent / "config.example.yaml").read_text()
     )
     mqtt = main.require(config, "mqtt")
     main.require(mqtt, "topics")
