@@ -23,20 +23,25 @@ persist.json
 junit/
 .pytest_cache/
 .ruff_cache/
+docs/superpowers/
+.vscode/
+.idea/
+.claude/
+.DS_Store
+
+*.log
 
 # act run byproducts (docker-local/run.sh)
 docker-local/logs/
 docker-local/artifacts/
 
-# Working notes, not for the remote
-docs/superpowers/
+# Clean tree built by docker-local/run.sh --release
+docker-local/.tree/
+docker-local/.release-check/
 
-# Editors / OS
-.vscode/
-.idea/
-.claude/
-CLAUDE.md
-.DS_Store
-
-# Logs
-*.log
+# Release build output. The release workflow writes binaries to dist/ and zips
+# to upload/; anything that runs it outside CI leaves them in the working tree,
+# where `git add -A` would commit a 12MB binary. Pinned by
+# test/test_release_pipeline.py::test_the_release_output_paths_are_gitignored
+dist/
+upload/

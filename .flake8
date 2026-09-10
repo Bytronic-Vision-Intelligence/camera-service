@@ -1,7 +1,6 @@
 [flake8]
 # .venv must be excluded: the local act runner bind-mounts the whole repo, so
 # without this flake8 lints every installed package in the virtualenv.
-# LJSwrap is a vendor SDK binding, not our code.
-exclude = .git,__pycache__,.venv,venv,docker-local,junit,app/dependencies/CameraLibrary/LJSwrap.py
+exclude = .git,__pycache__,.venv,venv,docker-local,junit
 max-line-length = 127
 max-complexity = 10

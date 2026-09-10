@@ -44,8 +44,14 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install flake8 pytest
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          pip install flake8
+          # requirements-dev.txt pulls in requirements.txt via `-r`, so this
+          # installs both. Runtime deps are kept separate because everything in
+          # requirements.txt is built into the shipped binary.
+          if [ -f requirements-dev.txt ]; then pip install -r requirements-dev.txt; fi
+          # The signing tests import cryptography, which the service itself
+          # never needs and so is not a runtime dependency.
+          if [ -f requirements-signing.txt ]; then pip install -r requirements-signing.txt; fi
 
       - name: Guard against case-only rename drift
         run: |

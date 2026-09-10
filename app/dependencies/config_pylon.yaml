@@ -16,8 +16,8 @@ camera_settings:
   # Pylon camera_settings are reserved; _apply_camera_settings is a no-op for now.
 
 trigger:
-  # external | hardware → frame thread; internal | software → MQTT + capture_image
-  trigger_type: internal
+  # hardware → frame thread; software → MQTT + capture_image
+  trigger_type: software
 
 archiving:
   is_archived: "true"

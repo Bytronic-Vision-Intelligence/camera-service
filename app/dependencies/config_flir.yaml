@@ -19,7 +19,7 @@ camera_settings:
   temperature_linear_mode: true
 
 trigger:
-  trigger_type: external
+  trigger_type: hardware
   # AX5: Line0 is the opto-isolated GPI (light gate). Keep Line0 unless wiring differs.
   trigger_source: Line0
   # RisingEdge / FallingEdge / AnyEdge — flip if the gate is idle-high vs idle-low

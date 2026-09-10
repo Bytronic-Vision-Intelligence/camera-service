@@ -1,6 +1,5 @@
 from harvesters.core import Harvester
 from dependencies.CameraLibrary.cameras import Camera
-from dependencies import loadConfig
 from queue import Queue
 from threading import Event
 import logging
@@ -128,7 +127,7 @@ class GigeCamera(Camera):
         self.harvester = None
 
         try:
-            serial = str(loadConfig.return_config_value("camera.serial_number") or "").strip()
+            serial = str(self.camera_config.get("serial_number") or "").strip()
         except Exception:
             serial = ""
 
@@ -139,7 +138,7 @@ class GigeCamera(Camera):
 
         try:
             try:
-                configured = str(loadConfig.return_config_value("camera.cti_path") or "").strip()
+                configured = str(self.camera_config.get("cti_path") or "").strip()
             except Exception:
                 configured = ""
 
@@ -200,7 +199,7 @@ class GigeCamera(Camera):
     def _apply_camera_settings(self, camera) -> None:
         """Apply optional ``camera_settings`` from the nested config (no trigger setup)."""
         nm = camera.remote_device.node_map
-        cfg = loadConfig.get_section("camera_settings")
+        cfg = self.camera_settings or {}
 
         pixel_format = str(cfg.get("pixel_format") or "").strip()
         if pixel_format:
@@ -217,7 +216,7 @@ class GigeCamera(Camera):
 
     def _apply_lights_settings(self, camera) -> None:
         """Apply optional ``lights`` config (digital output / strobe line)."""
-        cfg = loadConfig.get_section("lights")
+        cfg = self.lights_config or {}
         if not cfg:
             return
 
@@ -318,18 +317,24 @@ class GigeCamera(Camera):
             self._apply_camera_settings(self.cam)
             self._apply_lights_settings(self.cam)
 
-            # GigE trigger_type:
-            #   hardware    → line trigger (frame thread)
-            #   software    → GenICam TriggerSoftware (MQTT)
-            #   continuous  → TriggerMode Off; MQTT pulls next ready frame (may be stale)
-            trigger_cfg = loadConfig.get_section("trigger")
+            # GigE trigger_type + capture_type:
+            #   software + single     → GenICam TriggerSoftware (MQTT)
+            #   software + continuous → TriggerMode Off; MQTT on/off streaming
+            #   hardware + single     → line trigger (frame thread)
+            #   hardware + continuous → TriggerMode Off; frame thread streams
+            trigger_cfg = self.trigger_config or {}
             trigger_type = str(trigger_cfg.get("trigger_type") or "software").strip().lower()
-            if trigger_type not in ("hardware", "software", "continuous"):
+            capture_type = str(trigger_cfg.get("capture_type") or "single").strip().lower()
+            if trigger_type not in ("hardware", "software"):
                 raise RuntimeError(
-                    f"GigE trigger_type must be hardware, software, or continuous "
-                    f"(got {trigger_type!r})"
+                    f"GigE trigger_type must be hardware or software (got {trigger_type!r})"
+                )
+            if capture_type not in ("single", "continuous"):
+                raise RuntimeError(
+                    f"GigE capture_type must be single or continuous (got {capture_type!r})"
                 )
             self.trigger_type = trigger_type
+            self.capture_type = capture_type
 
             try:
                 nm.TriggerSelector.value = "FrameStart"
@@ -338,7 +343,7 @@ class GigeCamera(Camera):
                 # This is optional here, so continue with trigger setup.
                 logging.debug("Skipping TriggerSelector=FrameStart: %s", e)
 
-            if trigger_type == "hardware":
+            if trigger_type == "hardware" and capture_type == "single":
                 source = str(trigger_cfg.get("trigger_source") or "Line1")
                 activation = str(trigger_cfg.get("trigger_activation") or "RisingEdge")
                 try:
@@ -350,32 +355,38 @@ class GigeCamera(Camera):
                         f"Failed arming hardware trigger (source={source}, activation={activation})"
                     ) from e
                 logging.info(
-                    "TriggerMode=On (hardware): source=%s activation=%s",
+                    "TriggerMode=On (hardware/single): source=%s activation=%s",
                     source,
                     activation,
                 )
-            elif trigger_type == "software":
+            elif trigger_type == "software" and capture_type == "single":
                 try:
                     nm.TriggerSource.value = "Software"
                     nm.TriggerMode.value = "On"
                 except Exception as e:
                     raise RuntimeError("Failed arming software trigger") from e
-                logging.info("TriggerMode=On (software): TriggerSource=Software")
+                logging.info("TriggerMode=On (software/single): TriggerSource=Software")
             else:
                 try:
                     nm.TriggerMode.value = "Off"
                 except Exception as e:
-                    raise RuntimeError("Failed setting TriggerMode=Off for continuous") from e
-                logging.info("TriggerMode=Off (continuous)")
+                    raise RuntimeError(
+                        "Failed setting TriggerMode=Off for continuous capture"
+                    ) from e
+                logging.info(
+                    "TriggerMode=Off (%s/%s)",
+                    trigger_type,
+                    capture_type,
+                )
 
             self.cam.num_buffers = 4
             self.cam.start()
 
-            if trigger_type == "software":
+            if trigger_type == "software" and capture_type == "single":
                 nm.TriggerSoftware.execute()
                 with self.cam.fetch(timeout=timeout_s) as buffer:
                     _ = np.asarray(buffer.payload.components[0].data).copy()
-            elif trigger_type == "continuous":
+            elif capture_type == "continuous":
                 with self.cam.fetch(timeout=timeout_s) as buffer:
                     _ = np.asarray(buffer.payload.components[0].data).copy()
                 with self.cam.fetch(timeout=timeout_s) as buffer:
