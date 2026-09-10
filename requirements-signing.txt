@@ -1,0 +1,4 @@
+# Signing a release artefact, installed only by the release job. Kept out of
+# requirements.txt deliberately: the service never verifies its own signature,
+# so shipping a crypto library inside every binary buys nothing.
+cryptography==50.0.1

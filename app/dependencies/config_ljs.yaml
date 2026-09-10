@@ -26,8 +26,8 @@ camera:
       light_control_lower: 10
       detection_sensitivity: 3
 trigger:
-  # external | hardware → frame thread; internal | software → MQTT + capture_image
-  trigger_type: internal
+  # hardware → frame thread; software → MQTT + capture_image
+  trigger_type: software
 
 archiving:
   is_archived: "true"

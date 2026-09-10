@@ -9,7 +9,7 @@ camera:
   camera_type: opencv
   camera_id: 0
 trigger:
-  trigger_type: internal
+  trigger_type: software
 
 archiving:
   is_archived: "true"

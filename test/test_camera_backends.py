@@ -1,11 +1,4 @@
-"""Backend smoke tests for each camera_type preset.
-
-Presets live in ``test/fixtures/camera_backend_configs.yaml`` (same values as
-the commented blocks in config-library/config-camera_service_test.yaml).
-
-``dummy`` always runs when the image directory exists. Hardware backends skip
-unless ``RUN_CAMERA_HW_TESTS=1``, and still skip if the device is missing.
-"""
+"""Backend smoke tests for each camera_type preset."""
 
 from __future__ import annotations
 
@@ -36,9 +29,10 @@ HW_TYPES = {"opencv", "gige", "flir", "pylon", "ljs"}
 
 
 @pytest.fixture(autouse=True)
-def restore_config_path():
+def restore_config_path(monkeypatch):
+    monkeypatch.setattr(loadConfig, "_ACTIVE", None)
     yield
-    loadConfig.set_config_path(None)
+    monkeypatch.setattr(loadConfig, "_ACTIVE", None)
 
 
 def _load_fixture() -> dict:
@@ -55,25 +49,30 @@ def _camera_types() -> dict[str, dict]:
     return types
 
 
-def _service_shell(fixture: dict) -> dict:
-    shell = {
-        key: value
-        for key, value in fixture.items()
-        if key != "camera_types"
-    }
-    for required in ("mqtt", "trigger", "archiving"):
-        if required not in shell:
-            pytest.fail(f"fixture missing {required} section")
-    return shell
-
-
-def _write_config(tmp_path: Path, shell: dict, camera: dict) -> Path:
-    payload = {**shell, "camera": dict(camera)}
-    dummy = payload["camera"].get("dummy_location")
+def _write_config(tmp_path: Path, fixture: dict, camera: dict) -> Path:
+    cam = dict(camera)
+    camera_settings = cam.pop("camera_settings", None)
+    dummy = cam.get("dummy_location")
     if isinstance(dummy, str) and dummy and not Path(dummy).is_absolute():
-        payload["camera"]["dummy_location"] = str(
-            (CAMERA_SERVICE_ROOT / dummy).resolve()
-        )
+        cam["dummy_location"] = str((CAMERA_SERVICE_ROOT / dummy).resolve())
+
+    service = {
+        "camera": cam,
+        "trigger": dict(fixture.get("trigger") or {
+            "trigger_type": "software",
+            "capture_type": "single",
+        }),
+        "archiving": dict(fixture.get("archiving") or {}),
+        "lights": fixture.get("lights"),
+    }
+    if camera_settings is not None:
+        service["camera_settings"] = camera_settings
+
+    payload = {
+        "mqtt": dict(fixture["mqtt"]),
+        "service": service,
+        "logging": {"level": "INFO"},
+    }
 
     path = tmp_path / "config.yaml"
     path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
@@ -107,8 +106,13 @@ def test_camera_type_connect_and_capture(camera_type, tmp_path):
 
     fixture = _load_fixture()
     preset = fixture["camera_types"][camera_type]
-    config_path = _write_config(tmp_path, _service_shell(fixture), preset)
-    loadConfig.set_config_path(config_path)
+    config_path = _write_config(tmp_path, fixture, preset)
+    config = loadConfig.get_config(str(config_path))
+    service = config["service"]
+    camera_cfg = dict(service["camera"])
+    trigger_cfg = dict(service["trigger"])
+    camera_settings = service.get("camera_settings") or {}
+    lights = service.get("lights")
 
     if camera_type in HW_TYPES and os.environ.get("RUN_CAMERA_HW_TESTS") != "1":
         pytest.skip(
@@ -116,20 +120,26 @@ def test_camera_type_connect_and_capture(camera_type, tmp_path):
         )
 
     if camera_type == "dummy":
-        location = Path(loadConfig.return_config_value("camera.dummy_location"))
+        location = Path(camera_cfg["dummy_location"])
         if not location.is_dir():
             pytest.skip(f"dummy_location missing: {location}")
 
     camera = None
     try:
         try:
-            camera = set_camera_class(camera_type, dict(preset))
+            camera = set_camera_class(
+                camera_type,
+                camera_cfg,
+                trigger_cfg,
+                camera_settings=camera_settings,
+                lights_config=lights,
+            )
         except Exception as exc:
             if camera_type in HW_TYPES:
                 pytest.skip(f"{camera_type} not available: {exc}")
             raise
 
-        timeout = int(preset.get("capture_timeout") or 1000)
+        timeout = int(camera_cfg.get("capture_timeout") or 1000)
         image = camera.capture_image(timeout_ms=timeout)
         _assert_frame(image, camera_type)
     finally:

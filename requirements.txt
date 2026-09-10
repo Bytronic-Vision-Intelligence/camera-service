@@ -1,5 +1,7 @@
-# The MQTT client ships as a wheel in app/dependencies/ - main.py imports it
-# at module level, so it must be installed for the service to start at all.
+# Runtime dependencies only. Everything listed here is installed into the
+# release build and ends up inside the shipped binary, so a package that is
+# only needed to develop or test the service belongs in requirements-dev.txt
+# instead -- otherwise every customer receives a copy of it.
 ./app/dependencies/mqtt_client-1.0.0-py3-none-any.whl
 
 numpy==1.26.4
@@ -17,7 +19,3 @@ PyYAML==6.0.3
 # listed here because there is no Linux build; install it by hand on FLIR
 # machines. cameras_flir.py is imported lazily, so other camera types are
 # unaffected.
-
-# Caps every test (pytest.ini: timeout). A blocking test otherwise runs the
-# CI job to GitHub's 6-hour limit instead of failing.
-pytest-timeout==2.4.0

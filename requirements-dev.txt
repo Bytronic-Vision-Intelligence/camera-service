@@ -1,0 +1,11 @@
+# Development and test dependencies. Installed by CI and locally, never by the
+# release build, so nothing here reaches a customer's binary.
+-r requirements.txt
+
+packaging==26.2
+pluggy==1.6.0
+Pygments==2.20.0
+pytest==9.0.3
+# Caps every test (pytest.ini: timeout). A blocking test otherwise runs the
+# CI job to GitHub's 6-hour limit instead of failing.
+pytest-timeout==2.4.0

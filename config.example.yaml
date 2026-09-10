@@ -1,0 +1,66 @@
+# The shape of a service's configuration.
+#
+# Tracked example / starting point. service-orchestrator overwrites the live
+# config.yaml beside the binary from its own config (single source of truth).
+
+project: project
+
+mqtt:
+  mqtt_ip: localhost
+  mqtt_port: 1883
+  qos: 1
+
+  # trigger: MQTT software subscribe+trigger (single) or on/off (continuous)
+  # image: publish base; outputs append topic_end (e.g. /raw, /colourmap)
+  topics:
+    - name: trigger
+      topic: project/camera/ID/trigger
+      is_subscribe: true
+      is_trigger: true
+    - name: image
+      topic: project/camera/ID/image
+      is_subscribe: false
+
+service:
+  camera:
+    camera_type: dummy
+    camera_id: colour
+    capture_timeout: 10
+    dummy_location: ../data/dummy_camera/colour
+    file_type: bmp
+    # serial_number / cti_path / ljs: … for real backends
+
+  # trigger_type: software | hardware
+  # capture_type: single | continuous
+  #
+  # software + single     → MQTT trigger → one capture
+  # software + continuous → MQTT on/off arms a timed capture stream
+  # hardware + single     → camera line/edge IO → one frame
+  # hardware + continuous → camera free-run stream
+  trigger:
+    trigger_type: software
+    capture_type: single
+    # trigger_delay: 1.0          # software/continuous interval (seconds)
+    # continuous_fps: 2           # used if trigger_delay is 0
+    # trigger_source: Line1       # hardware/single
+    # trigger_activation: RisingEdge
+
+  images:
+    - default:
+        image_format: null
+        topic_end: null
+        archive: true
+
+  camera_settings: {}
+  lights: {}
+
+  archiving:
+    is_archived: true
+    archive_directory: ../data
+    archive_parameters:
+      archive_freq: daily
+      archive_storage: 50
+      archive_days: 30
+
+logging:
+  level: INFO
