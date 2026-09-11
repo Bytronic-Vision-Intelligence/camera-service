@@ -10,14 +10,15 @@ mqtt:
   mqtt_port: 1883
   qos: 1
 
+  # {project} / {camera_id} are filled from project / service.camera at startup.
   topics:
     - name: trigger
-      topic: test/camera/trigger
+      topic: "{project}/camera/{camera_id}/trigger"
       is_subscribe: true
       is_trigger: true
 
     - name: image
-      topic: test/camera/colour_image
+      topic: "{project}/camera/{camera_id}/image"
       is_subscribe: false
 
 service:
@@ -31,8 +32,25 @@ service:
     # Ignored: the dummy reads from disk.
     capture_timeout: 5000
 
+  # trigger_type: software | hardware
+  # capture_type: single | continuous
+  #
+  # software + single     → MQTT trigger → one capture
+  # software + continuous → MQTT on/off arms a timed capture stream
+  # hardware + single     → camera line/edge IO → one frame
+  # hardware + continuous → camera free-run stream
   trigger:
     trigger_type: software
+    capture_type: single
+
+  images:
+    - default:
+        image_format: null
+        topic_end: null
+        archive: true
+
+  camera_settings: {}
+  lights: {}
 
   archiving:
     is_archived: true

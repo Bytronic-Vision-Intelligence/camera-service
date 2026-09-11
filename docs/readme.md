@@ -1,9 +1,8 @@
 # Documentation
 
-Service documentation is in the repository [README](../Readme.md): setup,
-camera types, configuration, and running CI locally.
+Service documentation lives in the repository [README](../Readme.md): setup,
+configuration, the service-orchestrator contract, and running CI locally.
 
-Use this folder for design notes, MQTT topic conventions, and per-camera
-deployment guidance.
+Application internals are documented in [`app/readme.md`](../app/readme.md).
 
 The project licence is in `LICENSE`.

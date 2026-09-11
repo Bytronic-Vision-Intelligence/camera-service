@@ -1,4 +1,4 @@
-"""Reusable external / hardware trigger helpers for camera backends.
+"""Reusable hardware trigger helpers for camera backends.
 
 Vendor-specific setup lives in ``spinnaker_trigger``.
 Shared pieces here: config loading, edge detection, and the GPIO poll loop.
@@ -14,7 +14,6 @@ from threading import Event
 from typing import Callable, Optional
 
 import numpy as np
-
 
 logger = logging.getLogger(__name__)
 
@@ -43,11 +42,6 @@ def is_camera_loss_error(exc: BaseException) -> bool:
 def report_camera_loss(exc: BaseException, *, queue: Optional[Queue] = None) -> CameraLossError:
     """Log a single CAMERA LOSS report and optionally enqueue it for main."""
     loss = CameraLossError(str(exc))
-    # critical(), and nothing else. This used to print the same line as well,
-    # for a terminal nobody watches -- and print() is the one place it could
-    # not arrive, because stdout under the orchestrator is a pipe that
-    # block-buffers until several KB accumulate and loses the lot if the
-    # service dies. A camera loss is exactly when the service dies.
     logger.critical("CAMERA LOSS: %s", exc)
     if queue is not None:
         try:
@@ -59,7 +53,7 @@ def report_camera_loss(exc: BaseException, *, queue: Optional[Queue] = None) -> 
 
 @dataclass(frozen=True)
 class HardwareTriggerConfig:
-    """Settings for an external light-gate / GPIO trigger."""
+    """Settings for a hardware light-gate / GPIO trigger."""
 
     enabled: bool = False
     source: str = "Line0"
@@ -67,17 +61,19 @@ class HardwareTriggerConfig:
     poll_interval_s: float = 0.001
 
     @classmethod
-    def from_trigger_settings(cls, cfg: dict) -> "HardwareTriggerConfig":
-        """Build from the `service.trigger` section.
+    def from_app_config(cls, cfg: Optional[dict] = None) -> "HardwareTriggerConfig":
+        """Build from an injected trigger section.
 
-        Args:
-            cfg: the trigger settings. Required: this used to fall back to
-                reading the process-global config, which meant the caller could
-                not tell whether it had configured the trigger or not.
+        Hardware single-shot arms GenICam/GPIO edge capture.
+        Hardware continuous / software leave TriggerMode off (free-run or SW).
         """
-        trigger_type = str(cfg.get("trigger_type", "")).lower()
+        if cfg is None:
+            cfg = {}
+        trigger_type = str(cfg.get("trigger_type", "")).strip().lower()
+        capture_type = str(cfg.get("capture_type", "single")).strip().lower()
+        enabled = trigger_type == "hardware" and capture_type == "single"
         return cls(
-            enabled=trigger_type == "external",
+            enabled=enabled,
             source=str(cfg.get("trigger_source", "Line0")),
             activation=str(cfg.get("trigger_activation", "RisingEdge")),
             poll_interval_s=float(cfg.get("trigger_poll_interval_s", 0.001)),

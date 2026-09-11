@@ -18,95 +18,58 @@ mqtt:
   mqtt_port: 1883
   qos: 1
 
-  # Topics are looked up BY NAME, so a deployment can call them whatever it
-  # likes but must keep these two names:
-  #
-  #   trigger - a capture request arrives here. Only subscribed to when the
-  #             camera is triggered by software; an externally triggered
-  #             camera delivers frames itself and nothing subscribes.
-  #   image   - the encoded frame is published here.
-  #
-  # {camera_id} is filled in from service.camera.camera_id below, so one
-  # configuration serves any camera on the namespace. A placeholder nothing can
-  # fill is refused at startup rather than published literally.
+  # trigger: MQTT software subscribe+trigger (single) or on/off (continuous)
+  # image: publish base; outputs append topic_end (e.g. /raw, /colourmap)
+  # {camera_id} / {project} are filled from service.camera / project at startup.
   topics:
     - name: trigger
-      topic: project/camera/{camera_id}/trigger
+      topic: "{project}/camera/{camera_id}/trigger"
       is_subscribe: true
       is_trigger: true
-
     - name: image
-      topic: project/camera/{camera_id}/image
+      topic: "{project}/camera/{camera_id}/image"
       is_subscribe: false
 
-# Settings belonging to this service alone. Drivers read them by dotted path
-# beneath here, so `camera.serial_number` means service.camera.serial_number.
 service:
   camera:
-    # opencv | dummy | pylon | gige | flir | ljs
-    camera_type: opencv
-    camera_id: colour_1
+    camera_type: dummy
+    camera_id: colour
+    capture_timeout: 10
+    dummy_location: ../data/dummy_camera/colour
+    file_type: bmp
+    # serial_number / cti_path / ljs: … for real backends
 
-    # Milliseconds, handed to the vendor SDK's grab call. Cameras that grab on
-    # demand -- opencv and dummy -- ignore it.
-    capture_timeout: 5000
-
-    # camera_type: dummy replays images from a directory instead of opening
-    # any hardware. Both keys are required when it is selected.
-    # dummy_location: "./test"
-    # file_type: ".png"
-
-    # Open one specific camera. Unset, the first one found is used.
-    # serial_number: 25165090
-    # gentl_cti: "/opt/vendor/producer.cti"
-
-    # camera_type: ljs connects directly to an LJ-S head. See
-    # app/dependencies/CameraLibrary/settings_ljs.py for the full set.
-    # ljs:
-    #   host: "192.168.0.1"
-    #   port: 24691
-    #   high_speed_port: 24692
-
-  # How this camera is told to take a picture. Read here by main.py and by the
-  # drivers alike -- hardware_trigger and the GigE driver both take it from
-  # this section, so it lives in one place and cannot disagree with itself.
+  # trigger_type: software | hardware
+  # capture_type: single | continuous
+  #
+  # software + single     → MQTT trigger → one capture
+  # software + continuous → MQTT on/off arms a timed capture stream
+  # hardware + single     → camera line/edge IO → one frame
+  # hardware + continuous → camera free-run stream
   trigger:
-    # software, internal -> capture when a trigger message arrives
-    # hardware, external -> the camera delivers frames on its own
-    # GigE also accepts `continuous`: TriggerMode off, newest ready frame.
     trigger_type: software
-
-    # Externally triggered cameras only. Line0 is the opto-isolated GPI on a
-    # FLIR AX5; change it only if the wiring differs.
-    # trigger_source: Line0
-    # RisingEdge | FallingEdge | AnyEdge -- flip for an idle-high gate.
+    capture_type: single
+    # trigger_delay: 1.0          # software/continuous interval (seconds)
+    # continuous_fps: 2           # used if trigger_delay is 0
+    # trigger_source: Line1       # hardware/single
     # trigger_activation: RisingEdge
 
-  # Applied on connect by the gige and flir drivers.
-  # camera_settings:
-  #   pixel_format: BayerRG8
+  images:
+    - default:
+        image_format: null
+        topic_end: null
+        archive: true
 
-  # What to do to the frame after it is captured, before it is published.
-  # Null or absent leaves it exactly as the camera produced it.
-  # image:
-  #   colour_format: bgr_2_rgb
-  image: null
-
-  # Reserved. Nothing reads this yet; it is here so a deployment that
-  # configures lighting has a place to put it.
-  lights: null
+  camera_settings: {}
+  lights: {}
 
   archiving:
     is_archived: true
-    archive_directory: save_dir
+    archive_directory: ../data
     archive_parameters:
       archive_freq: daily
-      archive_storage: 50       # GB
-      archive_days: 30          # days
+      archive_storage: 50
+      archive_days: 30
 
-# How much this service says. It writes no log files: it logs to stdout, the
-# orchestrator forwards every line to project/logging/<service>, and
-# logging-service is the only thing that writes to disk.
-# DEBUG | INFO | WARNING | ERROR | CRITICAL
 logging:
   level: INFO

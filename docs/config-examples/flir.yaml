@@ -1,4 +1,4 @@
-# flir: an AX5 over PySpin, externally triggered by a light gate.
+# flir: an AX5 over PySpin, hardware-triggered by a light gate.
 #
 # PySpin ships only as a Windows wheel
 # (app/dependencies/spinnaker_python-...-win_amd64.whl); there is no Linux
@@ -14,14 +14,15 @@ mqtt:
   mqtt_port: 1883
   qos: 1
 
+  # {project} / {camera_id} are filled from project / service.camera at startup.
   topics:
     - name: trigger
-      topic: indonesia/inference/trigger
+      topic: "{project}/camera/{camera_id}/trigger"
       is_subscribe: true
       is_trigger: true
 
     - name: image
-      topic: indonesia/camera/image
+      topic: "{project}/camera/{camera_id}/image"
       is_subscribe: false
 
 service:
@@ -41,13 +42,31 @@ service:
     # true = temperature-linear counts; false = raw 14-bit signal
     temperature_linear_mode: true
 
+  # trigger_type: software | hardware
+  # capture_type: single | continuous
+  #
+  # software + single     → MQTT trigger → one capture
+  # software + continuous → MQTT on/off arms a timed capture stream
+  # hardware + single     → camera line/edge IO → one frame
+  # hardware + continuous → camera free-run stream
+  #
+  # (Legacy: external → hardware + single)
   trigger:
-    trigger_type: external
+    trigger_type: hardware
+    capture_type: single
     # Line0 is the opto-isolated GPI (light gate). Keep it unless the wiring
     # differs.
     trigger_source: Line0
     # RisingEdge | FallingEdge | AnyEdge -- flip for an idle-high gate.
     trigger_activation: RisingEdge
+
+  images:
+    - default:
+        image_format: null
+        topic_end: null
+        archive: true
+
+  lights: {}
 
   archiving:
     is_archived: true

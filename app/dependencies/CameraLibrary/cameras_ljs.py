@@ -18,7 +18,6 @@ from typing import Any, Optional
 
 import numpy as np
 
-
 from . import settings_ljs
 from .cameras import CameraHeightMap
 from .hardware_trigger import report_camera_loss
@@ -105,31 +104,46 @@ class LJSCamera(CameraHeightMap):
         height_mm = ljs.capture_image()   # 2D float32 array in mm, NaN = no data
         ljs.disconnect_camera()
 
-    With ``trigger.trigger_type: internal``, ``main.py`` subscribes to MQTT and
-    calls ``capture_image()`` (software ``LJS8IF_Trigger``). With ``external``,
-    the head is triggered from its TRG terminal and ``main.py`` drains
-    ``wait_for_frame()`` on a background thread.
+With ``trigger.trigger_type: software``, ``main.py`` subscribes to MQTT and
+calls ``capture_image()`` (software ``LJS8IF_Trigger``). With ``hardware``,
+the head is triggered from its TRG terminal and ``main.py`` drains
+``wait_for_frame()`` on a background thread.
 
     Any keyword arguments override the matching ``camera.ljs.*`` config key
     (host, port, high_speed_port, device_id, program, timeout_s,
     use_image_filter, interpolate_y, settings).
     """
 
-    def __init__(self, settings: dict | None = None, **overrides: Any) -> None:
-        """
-        Args:
-            settings: the service's own `service:` section; the head's own
-                settings are read from `camera.ljs` within it.
-            overrides: individual settings, for a caller driving the head
-                directly rather than through a service configuration.
-        """
+    def __init__(self, **overrides: Any) -> None:
         super().__init__()
-        # Not stored: `self.settings` on this class already means the LJ-S
-        # program settings, assigned at the end of this method. Keeping the
-        # service section here too would have one attribute mean two things,
-        # and the second assignment silently wins.
-        cfg = dict(((settings or {}).get("camera") or {}).get("ljs") or {})
-        cfg.update(overrides)
+        self._overrides = overrides
+        self.host = "192.168.0.1"
+        self.port = 24691
+        self.high_speed_port = 24692
+        self.device_id = 0
+        self.program = 0
+        self.timeout_s = 5.0
+        self.use_image_filter = False
+        self.interpolate_y = 1
+        self.settings: dict = {}
+
+        self.cam = None
+        self._connected = False
+        self._streaming = False
+        self._callback_ref = None
+        self._x_points = 0
+        self._y_lines = 0
+        self._pitch_z = 0
+        self._scratch: Optional[np.ndarray] = None
+        # Filled by the DLL's receive thread (via _on_profiles), drained by
+        # wait_for_frame()/capture_image(). Holds either a raw uint16
+        # (y_lines, x_points) ndarray, or an exception describing why the
+        # stream stopped.
+        self._raw_queue: Queue = Queue()
+
+    def _apply_ljs_config(self) -> None:
+        cfg = dict((self.camera_config or {}).get("ljs") or {})
+        cfg.update(self._overrides)
 
         self.host = str(cfg.get("host", "192.168.0.1"))
         self.port = int(cfg.get("port", 24691))
@@ -152,23 +166,10 @@ class LJSCamera(CameraHeightMap):
             )
         self.settings = dict(cfg.get("settings") or {})
 
-        self.cam = None
-        self._connected = False
-        self._streaming = False
-        self._callback_ref = None
-        self._x_points = 0
-        self._y_lines = 0
-        self._pitch_z = 0
-        self._scratch: Optional[np.ndarray] = None
-        # Filled by the DLL's receive thread (via _on_profiles), drained by
-        # wait_for_frame()/capture_image(). Holds either a raw uint16
-        # (y_lines, x_points) ndarray, or an exception describing why the
-        # stream stopped.
-        self._raw_queue: Queue = Queue()
-
     # -- connection lifecycle ------------------------------------------------
 
     def connect_to_camera(self, timeout: Optional[float] = None) -> LJSCamera:
+        self._apply_ljs_config()
         if LJSwrap is None:
             raise RuntimeError(
                 "LJ-S communication library unavailable: LJS8_IF.dll failed to "
@@ -440,7 +441,7 @@ class LJSCamera(CameraHeightMap):
         """Software-trigger one scan and return its height map (mm, NaN = invalid).
 
         ``main.py`` calls this for ``camera_type: ljs`` when
-        ``trigger.trigger_type`` is ``internal`` (MQTT-driven).
+        ``trigger.trigger_type`` is ``software`` (MQTT-driven).
         """
         if not self._connected:
             raise RuntimeError("LJSCamera is not connected")

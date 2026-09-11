@@ -94,7 +94,16 @@ fi
 mkdir -p artifacts logs
 
 LOG="logs/act-$(date +%Y%m%d-%H%M%S).log"
-ln -sf "$(basename "$LOG")" logs/latest.log
+# Touch first: on Windows/Git Bash with native symlinks, ln -sf to a missing
+# target fails with "No such file or directory" and set -e aborts the run.
+touch "$LOG"
+# Symlinks need Developer Mode (or admin) on Windows. If ln fails, write
+# straight to latest.log so the tee below still has a stable path to follow.
+if ! ln -sf "$(basename "$LOG")" logs/latest.log 2>/dev/null; then
+  rm -f "$LOG"
+  LOG=logs/latest.log
+  : > "$LOG"
+fi
 
 rc=0
 for mode in "${MODES[@]}"; do

@@ -55,6 +55,11 @@ class FakeCamera:
         self.connected = False
         self.disconnected = False
         self.captures = []
+        # Match injected attributes used by set_camera_class / backends.
+        self.camera_config = {}
+        self.trigger_config = {}
+        self.camera_settings = {}
+        self.lights_config = {}
 
     def connect_to_camera(self):
         self.connected = True

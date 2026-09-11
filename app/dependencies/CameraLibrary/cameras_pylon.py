@@ -7,21 +7,15 @@ import time
 import numpy as np
 
 class PylonCamera(Camera):
-    def __init__(self, settings: dict | None = None):
-        """
-        Args:
-            settings: the service's own `service:` section, handed in rather
-                than read from a global.
-        """
+    def __init__(self):
         super().__init__()
-        self.settings = dict(settings or {})
 
     def _find_camera(self) -> pylon.InstantCamera:
         """Open by ``camera.serial_number`` when set; otherwise first available device."""
         self.cam = None
 
         try:
-            serial = str((self.settings.get("camera") or {}).get("serial_number") or "").strip()
+            serial = str(self.camera_config.get("serial_number") or "").strip()
         except Exception:
             serial = ""
 

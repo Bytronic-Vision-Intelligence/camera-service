@@ -13,6 +13,10 @@ subscribe, log success, and be the wrong service. Nothing would say so.
 
 So the failures here are all the same failure, reported early: no --config, an
 empty --config, or a path that is not a file.
+
+Domain settings under ``service:`` are loaded in ``main`` with ``require`` and
+injected onto camera backends before ``connect_to_camera``. Cameras do not call
+back into this module for pin/serial/trigger knobs.
 """
 
 import argparse

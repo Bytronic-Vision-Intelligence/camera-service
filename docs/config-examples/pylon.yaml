@@ -10,14 +10,15 @@ mqtt:
   mqtt_port: 1883
   qos: 1
 
+  # {project} / {camera_id} are filled from project / service.camera at startup.
   topics:
     - name: trigger
-      topic: indonesia/inference/trigger
+      topic: "{project}/camera/{camera_id}/trigger"
       is_subscribe: true
       is_trigger: true
 
     - name: image
-      topic: indonesia/camera/image
+      topic: "{project}/camera/{camera_id}/image"
       is_subscribe: false
 
 service:
@@ -33,10 +34,27 @@ service:
     buffer_size: 0
     # Reserved: _apply_camera_settings is a no-op for pylon today.
 
+  # trigger_type: software | hardware
+  # capture_type: single | continuous
+  #
+  # software + single     → MQTT trigger → one capture
+  # software + continuous → MQTT on/off arms a timed capture stream
+  # hardware + single     → camera line/edge IO → one frame
+  # hardware + continuous → camera free-run stream
+  #
+  # (Legacy: internal/software → software + single;
+  #  external/hardware → hardware + single)
   trigger:
-    # external, hardware -> frame thread
-    # internal, software -> MQTT trigger then capture_image
-    trigger_type: internal
+    trigger_type: software
+    capture_type: single
+
+  images:
+    - default:
+        image_format: null
+        topic_end: null
+        archive: true
+
+  lights: {}
 
   archiving:
     is_archived: true

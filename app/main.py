@@ -1,27 +1,9 @@
-"""camera-service: capture a frame when triggered, and publish it.
-
-The service runs the configuration it is given -- `--config PATH`, required --
-and takes its broker and topics from the `mqtt` section every Bytronic service
-shares. Two topics are looked up by name:
-
-  * `trigger`: a capture request arrives here. Subscribed to only when the
-    camera is triggered by software. An externally triggered camera delivers
-    frames itself, so there is nothing to subscribe to and no request to wait
-    for.
-  * `image`: the encoded frame is published here.
-
-Topics may carry `{camera_id}`, filled in from this service's own settings, so
-one configuration serves any camera on the namespace.
-
-Its own settings -- which camera, how it triggers, what to do to the frame,
-whether it is archived -- live under `service`, and each vendor driver is
-handed that section when it is built.
-"""
-
 import base64
-import logging
+import json
 import signal
 import time
+from json import JSONDecodeError
+from logging import critical, debug, error, info
 from queue import Empty, Queue
 from sys import getsizeof
 from threading import Event, Thread
@@ -34,35 +16,19 @@ from dependencies.CameraLibrary.cameras import Camera
 from dependencies.CameraLibrary.hardware_trigger import CameraLossError
 from dependencies.archive_functions import archive_image
 from dependencies.image_functions import (
-    apply_image_settings,
+    apply_image_format,
+    build_image_topic,
     encode_date_time_to_bytes,
     encode_image_to_bytes,
+    image_encoding,
+    resolve_image_outputs,
 )
 from dependencies.mqtt_functions import start_subscribe_thread
 
-#: trigger_type values that mean the camera delivers frames on its own.
-EXTERNAL_TRIGGERS = ("external", "hardware")
-
 
 def require(config: dict, key: str):
-    """Return a required top-level config value, or exit describing what is missing.
-
-    Args:
-        config: the loaded configuration mapping.
-        key: the top-level key the service cannot start without.
-    Returns:
-        the value stored under `key`.
-    Raises:
-        SystemExit: when `key` is absent, naming both the key and the file.
-    """
-    # `is None` as well as absent: a key present but empty is a section
-    # somebody meant to fill in, and letting it through moves the failure to
-    # whatever first subscripts it.
+    """Return a required config value, or exit describing what is missing."""
     if key not in config or config[key] is None:
-        # Named only if one has been loaded. require() is also called on
-        # nested sections in contexts that never parsed arguments, and
-        # config_path() refuses to guess there -- which would replace this
-        # message with one about the wrong problem entirely.
         try:
             where = f" in {loadConfig.config_path()}"
         except SystemExit:
@@ -72,173 +38,87 @@ def require(config: dict, key: str):
 
 
 def fill_placeholders(topic: str, values: dict) -> str:
-    """Substitute `{camera_id}` and friends into a configured topic.
-
-    One configuration then serves any camera: the id is written once under
-    `service.camera` and the topics follow it.
-
-    Args:
-        topic: the topic as configured, e.g. `project/camera/{camera_id}/image`.
-        values: what the placeholders may refer to.
-    Raises:
-        SystemExit: naming a placeholder nothing can fill. Left in, it would be
-            published and subscribed to literally -- the service would connect,
-            report itself healthy, and match no camera at all.
-    """
+    """Substitute ``{camera_id}`` and friends into a configured topic."""
     try:
         return topic.format_map(values)
     except KeyError as missing:
         raise SystemExit(
             f"Topic {topic!r} uses {missing} and nothing supplies it. "
-            f"Available: {', '.join(sorted(values))}.")
+            f"Available: {', '.join(sorted(values))}."
+        )
     except (IndexError, ValueError) as exc:
         raise SystemExit(f"Topic {topic!r} is not a valid template: {exc}")
 
 
 def topic_named(topics: list, name: str, values: dict | None = None) -> str:
-    """Return the topic string declared under `name`, placeholders filled in.
-
-    Topics are matched by their `name`, not their position or their text, so a
-    deployment can point this camera anywhere without the code knowing which
-    of them is the trigger and which carries the image.
-
-    Args:
-        topics: the `mqtt.topics` entries.
-        name: the `name:` to find.
-        values: what `{placeholders}` in the topic may refer to.
-    Raises:
-        SystemExit: when no entry carries that name, or it carries no topic.
-            Refusing here costs a startup; discovering it later means a camera
-            that connects, reports itself healthy and publishes into nothing.
-    """
+    """Return the topic string declared under ``name``, placeholders filled in."""
     for topic in topics:
         if topic.get("name") != name:
             continue
         value = topic.get("topic")
         if not value:
-            raise SystemExit(
-                f"Topic '{name}' has no `topic:` value")
+            raise SystemExit(f"Topic '{name}' has no `topic:` value")
         return fill_placeholders(str(value), values or {})
     raise SystemExit(
         f"No topic named '{name}'. camera-service looks its "
-        f"topics up by name; add `- name: {name}` under mqtt.topics.")
+        f"topics up by name; add `- name: {name}` under mqtt.topics."
+    )
 
 
-def read_settings(config: dict) -> dict:
-    """Everything this service needs from its configuration, validated up front.
-
-    All of it, before any hardware is opened. A `require` left in the capture
-    loop is a configuration error that waits for a trigger to arrive -- on a
-    machine nobody is watching, after the deployment was called good.
-
-    Args:
-        config: the whole configuration mapping.
-    Returns:
-        the settings main() runs on.
-    Raises:
-        SystemExit: naming the first key that is missing, and the file.
-    """
-    mqtt_config = require(config, "mqtt")
-    topics = require(mqtt_config, "topics")
-    service_config = require(config, "service")
-    camera_config = require(service_config, "camera")
-    trigger_config = require(service_config, "trigger")
-    archive_config = require(service_config, "archiving")
-
-    camera_id = require(camera_config, "camera_id")
-    placeholders = {
-        "camera_id": camera_id,
-        "project": config.get("project", "project"),
-    }
-
-    # From `service.trigger`, which is where the drivers read it from too --
-    # hardware_trigger.HardwareTriggerConfig and the GigE driver both take it
-    # from that section.
-    #
-    # GigE: hardware | software | continuous. LJS and others: external |
-    # internal. internal/software -> MQTT trigger then capture_image;
-    # external/hardware -> the camera's own frame thread.
-    trigger_type = str(require(trigger_config, "trigger_type")).strip().lower()
-    is_external_trigger = trigger_type in EXTERNAL_TRIGGERS
-
-    return {
-        "broker_ip": require(mqtt_config, "mqtt_ip"),
-        "broker_port": require(mqtt_config, "mqtt_port"),
-        "image_topic": topic_named(topics, "image", placeholders),
-        # Not looked up at all when nothing subscribes: an externally triggered
-        # camera needs no trigger topic and must not be refused for lacking one.
-        "trigger_topic": (None if is_external_trigger
-                          else topic_named(topics, "trigger", placeholders)),
-        "is_external_trigger": is_external_trigger,
-        # The whole section, because a driver reads `camera`,
-        # `camera_settings` and `trigger` from it.
-        "service_config": service_config,
-        "camera_config": camera_config,
-        "camera_id": camera_id,
-        "camera_type": require(camera_config, "camera_type"),
-        "capture_timeout": require(camera_config, "capture_timeout"),
-        # Optional, and applied only when present: `image: null` means leave
-        # the frame exactly as the camera produced it.
-        "image_config": service_config.get("image") or {},
-        "is_archived": require(archive_config, "is_archived"),
-        "archive_directory": require(archive_config, "archive_directory"),
-        "archive_parameters": require(archive_config, "archive_parameters"),
-    }
+def apply_topic_placeholders(topics: list, values: dict) -> None:
+    """Fill placeholders on every configured topic string in place."""
+    for entry in topics:
+        value = entry.get("topic")
+        if value:
+            entry["topic"] = fill_placeholders(str(value), values)
 
 
-def set_camera_class(camera_type: str, settings: dict):
-    """Construct and connect the driver for `camera_type`.
+def set_camera_class(
+    camera_type: str,
+    camera_config: dict,
+    trigger_config: dict,
+    camera_settings: dict | None = None,
+    lights_config: dict | None = None,
+):
+    """Construct a camera backend, inject service config, and connect.
 
-    Every driver but opencv is imported lazily: they need vendor SDKs that are
-    not installed on a machine running a different camera, and a module-level
-    import would stop the service starting at all.
-
-    Each driver is HANDED its settings rather than reading them. A driver that
-    reaches for a process-global config can only be exercised with a config
-    file on disk -- which is why the vendor drivers had no tests at all -- and
-    cannot be told about two cameras in one process.
-
-    Args:
-        camera_type: the `service.camera.camera_type` value.
-        settings: the whole `service:` section. Drivers read `camera`,
-            `camera_settings` and `trigger` from within it.
-    Raises:
-        ValueError: when the type is empty or not one this service supports.
+    All backends take no constructor arguments; domain knobs are set on the
+    instance before ``connect_to_camera`` so they never call back into
+    ``loadConfig``.
     """
     if not camera_type:
         raise ValueError("Camera type cannot be empty.")
-
-    camera_settings = settings.get("camera") or {}
 
     if camera_type == "opencv":
         camera = Camera()
     elif camera_type == "dummy":
         from dependencies.CameraLibrary.cameras_dummy import DummyCamera
-        camera = DummyCamera(require(camera_settings, "dummy_location"),
-                             require(camera_settings, "file_type"))
+        camera = DummyCamera()
     elif camera_type == "pylon":
         from dependencies.CameraLibrary.cameras_pylon import PylonCamera
-        camera = PylonCamera(settings)
+        camera = PylonCamera()
     elif camera_type == "gige":
         from dependencies.CameraLibrary.cameras_gige import GigeCamera
-        camera = GigeCamera(settings)
+        camera = GigeCamera()
     elif camera_type == "flir":
         from dependencies.CameraLibrary.cameras_flir import FlirCamera
-        camera = FlirCamera(settings)
+        camera = FlirCamera()
     elif camera_type == "ljs":
         from dependencies.CameraLibrary.cameras_ljs import LJSCamera
-        camera = LJSCamera(settings)
+        camera = LJSCamera()
     else:
         raise ValueError(f"Unsupported camera type: {camera_type}")
 
+    camera.camera_config = camera_config
+    camera.trigger_config = trigger_config
+    camera.camera_settings = camera_settings or {}
+    camera.lights_config = lights_config if isinstance(lights_config, dict) else {}
     camera.connect_to_camera()
     return camera
 
 
 def start_frame_thread(queue: Queue, camera: Camera, stop_event: Event) -> Thread:
-    """Run the camera's own frame loop, for an externally triggered camera."""
-    # Do not pass the wrapper as `camera=` -- wait_for_frame expects the
-    # vendor handle (self.cam). Omitting it lets Pylon/FLIR use self.cam.
+    """Run ``camera.wait_for_frame`` on a daemon thread (hardware paths)."""
     thread = Thread(
         target=camera.wait_for_frame,
         args=(queue, stop_event),
@@ -248,179 +128,453 @@ def start_frame_thread(queue: Queue, camera: Camera, stop_event: Event) -> Threa
     return thread
 
 
-def is_capture_request(payload) -> bool:
-    """Whether an MQTT payload asks for a capture.
+def start_subscribers(mqtt_config: dict, topics: list, stop_event: Event) -> list:
+    """Start one listener thread per subscribed topic (size-1 latest-only queues)."""
+    threads = []
+    for topic in topics:
+        if not topic.get("is_subscribe"):
+            continue
+        topic["queue"] = Queue(maxsize=1)
+        threads.append(
+            start_subscribe_thread(
+                mqtt_config["mqtt_ip"],
+                mqtt_config["mqtt_port"],
+                topic["topic"],
+                topic["queue"],
+                stop_event,
+            )
+        )
+    return threads
 
-    Other services publish on shared namespaces, so a message arriving on the
-    trigger topic is not automatically a request to capture.
-    """
-    return "trigger" in str(payload)
+
+def trigger_queue_from_topics(topics: list) -> Queue | None:
+    """Return the size-1 queue for the named trigger topic, if any."""
+    for topic in topics:
+        if topic.get("name") == "trigger" and "queue" in topic:
+            return topic["queue"]
+    for topic in topics:
+        if topic.get("is_trigger") and "queue" in topic:
+            return topic["queue"]
+    return None
 
 
-def acquire_image(message, camera, settings: dict):
-    """Turn one queued message into an image, or None if there is nothing to do.
-
-    The two trigger styles put entirely different things on the same queue, and
-    conflating them is what broke this loop before: an MQTT payload is text
-    asking for a picture, while an externally triggered camera puts the picture
-    itself there.
-
-    Args:
-        message: whatever the listener or the frame thread queued.
-        camera: the connected driver.
-        settings: what read_settings returned.
-    Returns:
-        the image, or None when this message asked for nothing, was not a
-        frame, or the grab failed. A failed grab is not fatal: the next trigger
-        may well work, and taking the camera out of service over one bad frame
-        loses every picture after it.
-    """
-    if settings["is_external_trigger"]:
-        if not isinstance(message, np.ndarray):
-            logging.error("Expected an image frame from the queue, got %s", type(message))
-            return None
-        return message
-
-    if not is_capture_request(message):
-        return None
-
-    logging.info("Capturing image...")
+def continuous_interval_s(trigger_config: dict) -> float:
+    """Seconds between software-continuous captures."""
     try:
-        image = camera.capture_image(timeout_ms=settings["capture_timeout"])
-    except Exception as exc:
-        logging.error("Capture failed; skipping trigger: %s", exc, exc_info=True)
-        return None
+        where = f" in {loadConfig.config_path()}"
+    except SystemExit:
+        where = ""
+    try:
+        delay = float(trigger_config.get("trigger_delay", 0) or 0)
+    except (TypeError, ValueError) as exc:
+        raise SystemExit(
+            f"Invalid service.trigger.trigger_delay{where}: {exc}"
+        ) from exc
+    if delay < 0:
+        raise SystemExit(
+            f"service.trigger.trigger_delay must be >= 0{where}"
+        )
+    if delay > 0:
+        return delay
+    try:
+        fps = float(trigger_config.get("continuous_fps", 2) or 2)
+    except (TypeError, ValueError):
+        fps = 2.0
+    return 1.0 / max(fps, 0.1)
 
-    if image is None:
-        # A driver that answered without raising and without a frame. Silence
-        # here would look identical to a trigger nobody sent.
-        logging.error("The camera returned no image to encode.")
-    return image
 
-
-def archive_if_wanted(image, settings: dict) -> None:
-    """Write the frame to the archive, if this deployment keeps one."""
-    if not settings["is_archived"]:
-        return
-
-    camera_id = settings["camera_id"]
+def publish_outputs(
+    client: MQTTClient,
+    image,
+    image_outputs: list,
+    base_image_topic: str,
+    camera_config: dict,
+    archive_config: dict,
+) -> None:
+    """Format, optionally archive, encode, and publish every configured output."""
+    date_time = encode_date_time_to_bytes()
     timestamp = time.strftime("%Y%m%d_%H%M%S")
-    filename = f"cam_{camera_id or '0'}_{settings['camera_type']}_{timestamp}"
-    archive_image(
+    archived = require(archive_config, "is_archived")
+    is_archived = str(archived).strip().lower() in {"1", "true", "yes", "on"}
+
+    for output in image_outputs:
+        try:
+            variant = apply_image_format(image, output)
+        except Exception as exc:
+            error(
+                "Failed to apply image_format for image %s: %s",
+                output["id"],
+                exc,
+                exc_info=True,
+            )
+            continue
+
+        topic = build_image_topic(base_image_topic, output["topic_end"])
+
+        if is_archived and output["archive"]:
+            archive_filename = (
+                f"cam_{require(camera_config, 'camera_id') or '0'}_"
+                f"{require(camera_config, 'camera_type')}_"
+                f"{output['id']}_{timestamp}"
+            )
+            archive_image(
+                variant,
+                require(archive_config, "archive_directory"),
+                archive_filename,
+                require(archive_config, "archive_parameters"),
+                require(camera_config, "camera_id"),
+            )
+
+        image_bytes = encode_image_to_bytes(variant)
+        packet = {
+            "image": base64.b64encode(image_bytes).decode("ascii"),
+            "date_time": date_time.decode("utf-8"),
+            "image_id": output["id"],
+            "encoding": image_encoding(variant),
+        }
+
+        info(
+            "Publishing image %s to %s (size %s)",
+            output["id"],
+            topic,
+            getsizeof(image_bytes),
+        )
+
+        try:
+            client.publish(topic, packet)
+        except Exception as exc:
+            error(
+                "Error publishing image %s to %s: %s",
+                output["id"],
+                topic,
+                exc,
+            )
+
+
+def _capture_and_publish(
+    client,
+    camera,
+    camera_config,
+    image_outputs,
+    base_image_topic,
+    archive_config,
+    image=None,
+) -> None:
+    start_time = time.time()
+    info("Capturing image...")
+    if image is None:
+        try:
+            image = camera.capture_image(
+                timeout_ms=require(camera_config, "capture_timeout")
+            )
+        except Exception as exc:
+            error("Capture failed; skipping: %s", exc, exc_info=True)
+            return
+    if image is None:
+        error("No image available to encode.")
+        return
+    publish_outputs(
+        client,
         image,
-        settings["archive_directory"],
-        filename,
-        settings["archive_parameters"],
-        camera_id,
+        image_outputs,
+        base_image_topic,
+        camera_config,
+        archive_config,
     )
+    info(
+        "Image published in %.3fs.",
+        time.time() - start_time,
+    )
+
+
+def run_software_single(
+    mqtt_config,
+    topics,
+    client,
+    camera,
+    camera_config,
+    image_outputs,
+    base_image_topic,
+    archive_config,
+    stop_event: Event,
+) -> list:
+    """MQTT trigger message → one software capture."""
+    threads = start_subscribers(mqtt_config, topics, stop_event)
+    event_queue = trigger_queue_from_topics(topics)
+    if event_queue is None:
+        raise SystemExit("software/single requires a subscribed trigger topic")
+
+    time.sleep(0.1)
+    while not stop_event.is_set():
+        try:
+            message = event_queue.get(timeout=1.0)
+        except Empty:
+            continue
+        if message is None or "trigger" not in str(message):
+            continue
+        _capture_and_publish(
+            client, camera, camera_config, image_outputs,
+            base_image_topic, archive_config,
+        )
+    return threads
+
+
+def continuous_stream_command(message) -> bool | None:
+    """Interpret an MQTT payload as continuous stream on/off.
+
+    Returns True to start streaming, False to stop, None if the payload is
+    not a recognised stream command.
+    """
+    text = ""
+    data = None
+    if isinstance(message, (bytes, bytearray)):
+        text = bytes(message).decode("utf-8", errors="replace")
+    elif isinstance(message, str):
+        text = message
+    elif isinstance(message, dict):
+        data = message
+    else:
+        text = str(message)
+
+    if data is None and text:
+        try:
+            parsed = json.loads(text)
+        except (JSONDecodeError, TypeError):
+            parsed = None
+        if isinstance(parsed, dict):
+            data = parsed
+
+    if isinstance(data, dict):
+        if "active" in data:
+            active = data.get("active")
+            if isinstance(active, str):
+                return active.strip().lower() not in {"false", "0", "off", "no"}
+            return bool(active)
+        command = str(data.get("command") or data.get("stream") or "").strip().lower()
+        if command in {"on", "start", "continuous", "enable"}:
+            return True
+        if command in {"off", "stop", "disable"}:
+            return False
+
+    lowered = text.strip().lower()
+    if lowered in {"on", "start", "enable"}:
+        return True
+    if lowered in {"off", "stop", "disable"}:
+        return False
+    if '"active"' in lowered or "active" in lowered:
+        # Fall through for ambiguous payloads.
+        if "false" in lowered or "off" in lowered:
+            return False
+        if "true" in lowered or "on" in lowered:
+            return True
+    return None
+
+
+def run_software_continuous(
+    mqtt_config,
+    topics,
+    trigger_config,
+    client,
+    camera,
+    camera_config,
+    image_outputs,
+    base_image_topic,
+    archive_config,
+    stop_event: Event,
+) -> list:
+    """MQTT on/off controls a continuous software capture stream.
+
+    Start with ``{"active": true}`` / ``on``; stop with ``{"active": false}`` /
+    ``off``. While on, frames are captured at ``trigger_delay`` /
+    ``continuous_fps`` — the service does not fire repeated trigger messages.
+    """
+    threads = start_subscribers(mqtt_config, topics, stop_event)
+    event_queue = trigger_queue_from_topics(topics)
+    if event_queue is None:
+        raise SystemExit("software/continuous requires a subscribed trigger topic")
+
+    interval = continuous_interval_s(trigger_config)
+    streaming = False
+    info(
+        "software/continuous idle; MQTT on/off arms capture every %.3fs",
+        interval,
+    )
+
+    time.sleep(0.1)
+    while not stop_event.is_set():
+        try:
+            message = event_queue.get(timeout=0.1 if streaming else 1.0)
+        except Empty:
+            message = None
+
+        if message is not None:
+            command = continuous_stream_command(message)
+            if command is True:
+                streaming = True
+                info("software/continuous stream ON")
+            elif command is False:
+                streaming = False
+                info("software/continuous stream OFF")
+
+        if not streaming:
+            continue
+
+        _capture_and_publish(
+            client, camera, camera_config, image_outputs,
+            base_image_topic, archive_config,
+        )
+        # Drain any stop command that arrived during capture; otherwise wait.
+        deadline = time.monotonic() + interval
+        while streaming and not stop_event.is_set() and time.monotonic() < deadline:
+            remaining = deadline - time.monotonic()
+            try:
+                message = event_queue.get(timeout=max(remaining, 0.01))
+            except Empty:
+                break
+            command = continuous_stream_command(message)
+            if command is True:
+                streaming = True
+            elif command is False:
+                streaming = False
+                info("software/continuous stream OFF")
+    return threads
+
+
+def run_hardware_path(
+    client,
+    camera,
+    camera_config,
+    image_outputs,
+    base_image_topic,
+    archive_config,
+    stop_event: Event,
+    *,
+    capture_type: str,
+) -> list:
+    """Hardware single (line/edge) or continuous (camera free-run stream).
+
+    Both use ``wait_for_frame``; backends arm GenICam from injected trigger config.
+    """
+    event_queue: Queue = Queue(maxsize=1)
+    threads = [start_frame_thread(event_queue, camera, stop_event)]
+    info("hardware/%s waiting on camera frames", capture_type)
+
+    time.sleep(0.1)
+    while not stop_event.is_set():
+        try:
+            message = event_queue.get(timeout=1.0)
+        except Empty:
+            continue
+
+        if isinstance(message, CameraLossError):
+            critical("CAMERA LOSS: %s", message)
+            raise SystemExit(1)
+
+        if not isinstance(message, np.ndarray):
+            error("Expected image frame from queue, got %s", type(message))
+            continue
+
+        _capture_and_publish(
+            client, camera, camera_config, image_outputs,
+            base_image_topic, archive_config, image=message,
+        )
+    return threads
 
 
 def main(argv=None) -> int:
     args = loadConfig.parse_cli(argv)
     config = loadConfig.get_config(args.config)
 
-    # Before the first thing that can exit. Until configure() runs the root
-    # logger sits at WARNING and every info() is dropped, so a service that
-    # failed while starting would say nothing about why.
     log_settings = config.get("logging") or {}
     logging_setup.configure(log_settings.get("level", logging_setup.DEFAULT_LEVEL))
 
-    # All of it, before any hardware is opened: a misnamed topic then costs a
-    # startup rather than a camera connection that is thrown away, and nothing
-    # the loop needs can be missing once it is running.
-    settings = read_settings(config)
-    image_topic = settings["image_topic"]
-    image_config = settings["image_config"]
+    mqtt_config = require(config, "mqtt")
+    topics = require(mqtt_config, "topics")
+    service = require(config, "service")
 
-    camera = set_camera_class(settings["camera_type"], settings["service_config"])
-    client = MQTTClient(MQTTConfig(host=settings["broker_ip"], port=settings["broker_port"]))
+    camera_config = require(service, "camera")
+    trigger_config = require(service, "trigger")
+    archive_config = require(service, "archiving")
+    camera_settings = service.get("camera_settings") or {}
+    lights_config = service.get("lights") or {}
+    image_outputs = resolve_image_outputs(service)
+
+    placeholders = {
+        "camera_id": require(camera_config, "camera_id"),
+        "project": config.get("project", "project"),
+    }
+    apply_topic_placeholders(topics, placeholders)
+    base_image_topic = topic_named(topics, "image", placeholders)
+
+    trigger_type = str(require(trigger_config, "trigger_type")).strip().lower()
+    capture_type = str(require(trigger_config, "capture_type")).strip().lower()
+    try:
+        where = f" in {loadConfig.config_path()}"
+    except SystemExit:
+        where = ""
+    if trigger_type not in ("software", "hardware"):
+        raise SystemExit(
+            f"service.trigger.trigger_type must be 'software' or 'hardware' "
+            f"(got {trigger_type!r}){where}"
+        )
+    if capture_type not in ("single", "continuous"):
+        raise SystemExit(
+            f"service.trigger.capture_type must be 'single' or 'continuous' "
+            f"(got {capture_type!r}){where}"
+        )
+
+    camera = set_camera_class(
+        require(camera_config, "camera_type"),
+        camera_config,
+        trigger_config,
+        camera_settings=camera_settings,
+        lights_config=lights_config,
+    )
+    client = MQTTClient(
+        MQTTConfig(host=mqtt_config["mqtt_ip"], port=mqtt_config["mqtt_port"]))
     client.connect()
 
-    # Latest-only queue: prevents long latency spikes from stale trigger backlog.
-    event_queue = Queue(maxsize=1)
     stop_event = Event()
+    threads: list = []
     exit_code = 0
 
     def _request_shutdown(signum, _frame):
-        logging.info("Received signal %s; requesting shutdown.", signum)
+        info("Received signal %s; requesting shutdown.", signum)
         stop_event.set()
 
     signal.signal(signal.SIGINT, _request_shutdown)
     signal.signal(signal.SIGTERM, _request_shutdown)
 
-    if settings["is_external_trigger"]:
-        subscribe_thread = start_frame_thread(event_queue, camera, stop_event)
-    else:
-        subscribe_thread = start_subscribe_thread(
-            settings["broker_ip"], settings["broker_port"],
-            settings["trigger_topic"], event_queue, stop_event)
-
-    time.sleep(0.1)
     try:
-        while not stop_event.is_set():
-            try:
-                message = event_queue.get(timeout=1.0)
-            except Empty:
-                continue
-
-            # First, before anything inspects the payload. A CameraLossError is
-            # not a trigger and is not iterable, so testing it for a keyword
-            # raises TypeError out of the loop instead of exiting non-zero as
-            # intended.
-            if isinstance(message, CameraLossError):
-                logging.critical("CAMERA LOSS: %s", message)
-                exit_code = 1
-                break
-
-            if message is None:
-                logging.warning("Received an empty trigger payload; ignoring.")
-                continue
-
-            start_time = time.time()
-
-            image = acquire_image(message, camera, settings)
-            if image is None:
-                continue
-
-            date_time = encode_date_time_to_bytes()
-
-            if image_config:
-                image = apply_image_settings(image, image_config)
-
-            archive_if_wanted(image, settings)
-
-            image_bytes = encode_image_to_bytes(image)
-            packet = {
-                "image": base64.b64encode(image_bytes).decode("ascii"),
-                "date_time": date_time.decode("utf-8"),
-            }
-
-            logging.info("Publishing image of size %s to %s", getsizeof(image_bytes), image_topic)
-            try:
-                client.publish(image_topic, packet)
-            except Exception as exc:
-                logging.error("Error publishing image: %s", exc)
-                continue
-
-            logging.info("Image published in %.3fs. Waiting for next capture request...",
-                         time.time() - start_time)
-
+        if trigger_type == "software" and capture_type == "single":
+            threads = run_software_single(
+                mqtt_config, topics, client, camera, camera_config,
+                image_outputs, base_image_topic, archive_config, stop_event,
+            )
+        elif trigger_type == "software" and capture_type == "continuous":
+            threads = run_software_continuous(
+                mqtt_config, topics, trigger_config, client, camera, camera_config,
+                image_outputs, base_image_topic, archive_config, stop_event,
+            )
+        else:
+            threads = run_hardware_path(
+                client, camera, camera_config, image_outputs,
+                base_image_topic, archive_config, stop_event,
+                capture_type=capture_type,
+            )
     except KeyboardInterrupt:
-        logging.info("Shutting down and exiting.")
-
+        info("Shutting down and exiting.")
     finally:
         stop_event.set()
-        # End acquisition first so a blocked GetNextImage unblocks and the
-        # frame thread can exit before we DeInit (avoids leaving the camera
-        # locked).
         try:
             if hasattr(camera, "stop_acquisition"):
                 camera.stop_acquisition()
         except Exception:
-            logging.debug("stop_acquisition during shutdown failed", exc_info=True)
+            debug("stop_acquisition during shutdown failed", exc_info=True)
 
-        if subscribe_thread is not None and subscribe_thread.is_alive():
-            subscribe_thread.join(timeout=2)
+        for thread in threads:
+            if thread is not None and thread.is_alive():
+                thread.join(timeout=2)
 
         camera.disconnect_camera(camera.cam)
 

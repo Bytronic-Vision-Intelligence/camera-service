@@ -10,14 +10,15 @@ mqtt:
   mqtt_port: 1883
   qos: 1
 
+  # {project} / {camera_id} are filled from project / service.camera at startup.
   topics:
     - name: trigger
-      topic: indonesia/inference/trigger
+      topic: "{project}/camera/{camera_id}/trigger"
       is_subscribe: true
       is_trigger: true
 
     - name: image
-      topic: indonesia/camera/image
+      topic: "{project}/camera/{camera_id}/image"
       is_subscribe: false
 
 service:
@@ -29,18 +30,33 @@ service:
     # Milliseconds, passed to buffer fetch.
     capture_timeout: 5000
     # Path to a GenTL producer .cti. Unset, the known locations are searched.
-    # gentl_cti: "/opt/vendor/producer.cti"
+    # cti_path: "/opt/vendor/producer.cti"
+    # gentl_cti is a legacy alias for cti_path.
 
   camera_settings:
     pixel_format: BayerRG8
 
+  # trigger_type: software | hardware
+  # capture_type: single | continuous
+  #
+  # software + single     → MQTT trigger → GenICam TriggerSoftware → one frame
+  # software + continuous → MQTT on/off arms a timed capture stream
+  # hardware + single     → line trigger, frame thread → one frame
+  # hardware + continuous → TriggerMode off; free-run stream
+  #
+  # (Legacy: continuous as trigger_type → software + continuous, or
+  #  hardware + continuous when free-run was intended)
   trigger:
-    # GigE accepts a third value:
-    #   hardware   -> line trigger, frame thread
-    #   software   -> GenICam TriggerSoftware, driven by MQTT
-    #   continuous -> TriggerMode off; MQTT pulls the newest ready frame, which
-    #                 may be stale
     trigger_type: software
+    capture_type: single
+
+  images:
+    - default:
+        image_format: null
+        topic_end: null
+        archive: true
+
+  lights: {}
 
   archiving:
     is_archived: true
