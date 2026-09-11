@@ -69,9 +69,7 @@ class FlirCamera(Camera):
         Mono16 is accepted but bits 14–15 must be masked (always 1 on AX5).
         """
         try:
-            from dependencies import loadConfig
-
-            cfg = loadConfig.get_section("camera_settings")
+            cfg = self.camera_settings or {}
             pixel_format = str(cfg.get("pixel_format", "Mono14"))
             cmos_depth = str(cfg.get("cmos_bit_depth", "bit14bit"))
             temp_linear = str(cfg.get("temperature_linear_mode", "false")).lower()
@@ -113,9 +111,7 @@ class FlirCamera(Camera):
         self.cam = None
 
         try:
-            from dependencies import loadConfig
-
-            serial = str(loadConfig.return_config_value("camera.serial_number") or "").strip()
+            serial = str(self.camera_config.get("serial_number") or "").strip()
         except Exception:
             serial = ""
 
@@ -176,7 +172,7 @@ class FlirCamera(Camera):
 
             self._configure_raw_pixel_format(nodemap)
 
-            trigger_cfg = HardwareTriggerConfig.from_app_config()
+            trigger_cfg = HardwareTriggerConfig.from_app_config(self.trigger_config)
             self._trigger = SpinnakerHardwareTrigger(self.cam, trigger_cfg)
             self._trigger.configure(nodemap)
 

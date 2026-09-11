@@ -37,7 +37,7 @@ def _archive_save_dir(directory, archive_params: dict, camera_id=None) -> str | 
     if subfolder:
         path_parts.append(subfolder)
     if camera_id is not None:
-        path_parts.append(f"cam{camera_id}")
+        path_parts.append(f"cam_{camera_id}")
     save_directory = os.path.join(*path_parts)
     os.makedirs(save_directory, exist_ok=True)
     return save_directory

@@ -1,71 +1,86 @@
-A simple camera worker, using MQTT
+# Camera service
 
-worker will subscribe to a trigger topic and capture and send an image when it is requested by using the mqtt library 
-the image will be sent over a set topic to the mqtt broker
+One-process-per-camera MQTT capture worker built on the Bytronic service
+template. Supports six backends (dummy, opencv, GigE, FLIR, Pylon, LJS), dual
+event sources (MQTT trigger vs hardware/continuous frame thread), and
+multi-variant image publish (raw / colourmap / RGB).
 
-needs to have some of the values turned into yaml imports
+## Prerequisites
+
+- Python 3.10 or newer
+- An MQTT broker at `localhost:1883` (typical)
+- Backend SDKs as needed (Baumer CTI, Spinnaker, pylon, Keyence LJS DLL)
+
+## Quick start
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements-dev.txt
+```
+
+```bash
+python app/main.py --config ./config.yaml
+```
+
+Site examples (local; gitignored):
+
+```bash
+python app/main.py --config ./config-dunbia_seal.yaml
+python app/main.py --config ./config.example.yaml
+```
+
+```bash
+python -m pytest test
+```
+
+## What it does
+
+1. Connects the camera backend from `service.camera.camera_type`
+2. **Software / single:** subscribes to the `trigger` topic; payload must
+   contain `"trigger"`; then `capture_image`
+3. **Software / continuous:** MQTT on/off arms a timed capture stream (no
+   repeated trigger messages)
+4. **Hardware / single:** camera line/edge IO via `wait_for_frame`
+5. **Hardware / continuous:** camera free-run stream via `wait_for_frame`
+6. For each `service.images` entry: format → optional archive → JPEG/PNG encode
+   → publish `{image, date_time, image_id, encoding}` on
+   `{image topic}/{topic_end}`
+
+Orchestrator runs multiple instances (`camera-service`, `-2`, `-3`) each with
+its own config file.
+
 ## Configuration
 
-The service reads `app/dependencies/config.yaml` by default, or a file supplied
-on the command line:
+**`--config PATH` is required.**
 
-```bash
-python app/main.py --config /path/to/config.yaml
-```
+| Topic `name` | Role |
+|---|---|
+| `trigger` | subscribe + trigger (MQTT modes) |
+| `image` | publish base; `topic_end` appends `/raw`, `/colourmap`, … |
 
-`loadConfig.return_config_value` takes dotted paths — `camera.camera_type`,
-`archiving.archive_directory`. Per-camera variants of the config ship
-alongside the default: `config_flir.yaml`, `config_gige.yaml`,
-`config_ljs.yaml`, `config_opencv.yaml`, `config_pylon.yaml`.
+Domain knobs live under `service:`: `camera`, `trigger`, `camera_settings`,
+`lights`, `images`, `archiving`. CameraLibrary still reads them via
+`loadConfig.get_section` / dotted `return_config_value`, which resolve under
+`service` first.
 
-### Running under service-orchestrator
+Logging is stdout only (`logging.level`).
 
-[service-orchestrator](https://github.com/Bytronic-Vision-Intelligence/service-orchestrator)
-launches services as `app/main.py --config <path>` with a `.venv` in each
-service directory. This service already satisfies that contract.
+## Releasing
 
-One caveat: the orchestrator maps a config section to a directory of the same
-name, so the checkout must be named `camera-service`. Instances are numbered —
-`camera-service-2` shares the `camera-service/` directory and receives
-`config-2.yaml`.
+Push to `prod` runs the signed release pipeline. Keep `SERVICE_SIGNING_KEY` and
+`scripts/sign.py` `EXPECTED_PUBLIC_KEY` aligned.
 
-`/config.yaml` and `/config-*.yaml` are gitignored, because the orchestrator
-writes them into the repository root at startup.
+- `requirements.txt` — runtime
+- `requirements-dev.txt` — tests / CI
+- `requirements-signing.txt` — release job only
+- FLIR: install Spinnaker wheel by hand on Windows
 
-## Development
+## Project layout
 
-```bash
-python app/setup.py                      # creates .venv/ and installs requirements
-.venv/bin/python -m pytest test
-```
+- `app/main.py` — dual-path loop + publish
+- `app/dependencies/CameraLibrary/` — vendor backends
+- `app/dependencies/image_functions.py` / `archive_functions.py`
+- `config.yaml` — tracked shape
 
-PySpin is deliberately absent from `requirements.txt`: it ships only as a
-Windows wheel, so FLIR machines install it by hand. `cameras_flir.py` is
-imported lazily, so every other camera type is unaffected.
-
-OpenCV is pinned to `opencv-python-headless`. This service never calls
-`imshow`/`waitKey`, and the plain build needs `libGL.so.1`, which no CI runner
-or container provides.
-
-### Running CI locally
-
-`docker-local/` runs `.github/workflows/` on your machine through
-[nektos/act](https://github.com/nektos/act). It needs Docker running and is
-gitignored in some sibling repos — here it is tracked.
-
-```bash
-./docker-local/run.sh -l                        # list jobs
-./docker-local/run.sh                           # full push event
-./docker-local/run.sh --matrix os:ubuntu-latest # one matrix leg
-./docker-local/run.sh --fresh                   # wipe the toolcache first
-```
-
-Jobs run one at a time. act shares a single `act-toolcache` volume across job
-containers, so concurrent matrix legs corrupt each other's
-`/opt/hostedtoolcache` — which surfaces as `Fatal Python error: Bus error`
-while loading a native module. Real GitHub gives each leg its own runner.
-
-The `windows-latest` leg runs on a Linux image, so it proves job ordering, not
-Windows behaviour. And act bind-mounts the working tree rather than doing a
-fresh checkout, so anything depending on what git actually committed can pass
-locally and still fail on GitHub.
+License: see `docs/LICENSE`.

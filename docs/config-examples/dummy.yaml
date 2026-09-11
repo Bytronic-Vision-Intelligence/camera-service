@@ -1,0 +1,64 @@
+# dummy: replay images from a directory. No hardware, so this is the one to run a broker test against.
+#
+# Reference only -- nothing loads this file. See ../../config.example.yaml for
+# the annotated shape.
+
+project: test
+
+mqtt:
+  mqtt_ip: localhost
+  mqtt_port: 1883
+  qos: 1
+
+  # {project} / {camera_id} are filled from project / service.camera at startup.
+  topics:
+    - name: trigger
+      topic: "{project}/camera/{camera_id}/trigger"
+      is_subscribe: true
+      is_trigger: true
+
+    - name: image
+      topic: "{project}/camera/{camera_id}/image"
+      is_subscribe: false
+
+service:
+  camera:
+    camera_type: dummy
+    camera_id: "0001"
+    # Both required for camera_type: dummy. A frame is chosen at random from
+    # the files under dummy_location matching file_type.
+    dummy_location: "./test"
+    file_type: ".png"
+    # Ignored: the dummy reads from disk.
+    capture_timeout: 5000
+
+  # trigger_type: software | hardware
+  # capture_type: single | continuous
+  #
+  # software + single     → MQTT trigger → one capture
+  # software + continuous → MQTT on/off arms a timed capture stream
+  # hardware + single     → camera line/edge IO → one frame
+  # hardware + continuous → camera free-run stream
+  trigger:
+    trigger_type: software
+    capture_type: single
+
+  images:
+    - default:
+        image_format: null
+        topic_end: null
+        archive: true
+
+  camera_settings: {}
+  lights: {}
+
+  archiving:
+    is_archived: true
+    archive_directory: "save_dir"
+    archive_parameters:
+      archive_freq: "daily"
+      archive_storage: 50       # GB
+      archive_days: 30          # days
+
+logging:
+  level: INFO
