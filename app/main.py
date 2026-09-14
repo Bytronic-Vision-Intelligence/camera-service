@@ -9,12 +9,12 @@ from threading import Event, Thread
 import numpy as np
 from pathlib import Path
 
-from Dependencies import loadConfig
-from Dependencies.CameraLibrary.cameras import Camera
-from Dependencies.CameraLibrary.hardware_trigger import CameraLossError
-from Dependencies.mqtt_functions import start_subscribe_thread
-from Dependencies.data_functions import encode_date_time_to_bytes, encode_image_to_bytes
-from Dependencies.archive_functions import archive_image
+from dependencies import loadConfig
+from dependencies.CameraLibrary.cameras import Camera
+from dependencies.CameraLibrary.hardware_trigger import CameraLossError
+from dependencies.mqtt_functions import start_subscribe_thread
+from dependencies.data_functions import encode_date_time_to_bytes, encode_image_to_bytes
+from dependencies.archive_functions import archive_image
 from mqtt_client import MQTTClient, MQTTConfig
 
 def load_runtime_config(config_path: str | None = None) -> dict:
@@ -74,16 +74,16 @@ def set_camera_class(camera_type: str):
     if camera_type == "opencv":
         camera = Camera()
     elif camera_type == "pylon":
-        from Dependencies.CameraLibrary.cameras_pylon import PylonCamera
+        from dependencies.CameraLibrary.cameras_pylon import PylonCamera
         camera = PylonCamera()
     elif camera_type == "gige":
-        from Dependencies.CameraLibrary.cameras_gige import GigeCamera
+        from dependencies.CameraLibrary.cameras_gige import GigeCamera
         camera = GigeCamera()
     elif camera_type == "flir":
-        from Dependencies.CameraLibrary.cameras_flir import FlirCamera
+        from dependencies.CameraLibrary.cameras_flir import FlirCamera
         camera = FlirCamera()
     elif camera_type == "ljs":
-        from Dependencies.CameraLibrary.cameras_ljs import LJSCamera
+        from dependencies.CameraLibrary.cameras_ljs import LJSCamera
         camera = LJSCamera()
     else:
         raise ValueError(f"Unsupported camera type: {camera_type}")
