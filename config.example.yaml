@@ -37,7 +37,7 @@ service:
     capture_timeout: 10
     dummy_location: ../data/dummy_camera/colour
     file_type: bmp
-    # serial_number / cti_path / ljs: … for real backends
+    # serial_number / cti_path / camera_ip / port … for real backends
 
   # trigger_type: software | hardware
   # capture_type: single | continuous

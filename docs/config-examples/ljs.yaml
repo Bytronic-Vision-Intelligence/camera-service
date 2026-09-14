@@ -27,22 +27,21 @@ service:
     camera_type: ljs
     camera_id: 1
     capture_timeout: 5000
-    ljs:
-      host: "192.168.0.1"
-      port: 24691
-      high_speed_port: 24692    # must differ from `port`
-      device_id: 0
-      program: 0                # active program number, 0-15
-      timeout_s: 5.0
-      use_image_filter: false
-      interpolate_y: 4          # repeat each Y line 1-8x to match X pitch
-      settings:                 # applied to `program` on connect
-        exposure_time_us: 640   # see settings_ljs.py for the full registry
-        dynamic_range: 4
-        light_control_mode: "AUTO"
-        light_control_upper: 90
-        light_control_lower: 10
-        detection_sensitivity: 3
+    camera_ip: "192.168.0.1"
+    port: 24691
+    high_speed_port: 24692    # must differ from `port`
+    device_id: 0
+    program: 0                # active program number, 0-15
+    use_image_filter: false
+    interpolate_y: 4          # repeat each Y line 1-8x to match X pitch
+
+  camera_settings:            # applied to `program` on connect
+    exposure_time_us: 640     # see settings_ljs.py for the full registry
+    dynamic_range: 4
+    light_control_mode: "AUTO"
+    light_control_upper: 90
+    light_control_lower: 10
+    detection_sensitivity: 3
 
   # trigger_type: software | hardware
   # capture_type: single | continuous
@@ -63,7 +62,6 @@ service:
         topic_end: null
         archive: true
 
-  camera_settings: {}
   lights: {}
 
   archiving:

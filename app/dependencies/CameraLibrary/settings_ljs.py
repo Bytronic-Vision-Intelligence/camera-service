@@ -132,7 +132,7 @@ LIGHT_CONTROL_UPPER = SettingTarget(category=0x04, item=0x03)
 LIGHT_CONTROL_LOWER = SettingTarget(category=0x04, item=0x04)
 DETECTION_SENSITIVITY = SettingTarget(category=0x05, item=0x00)
 
-# Config key (config.yaml: camera.ljs.settings.<key>) -> (target, encoder).
+# Config key (service.camera_settings.<key>) -> (target, encoder).
 SETTINGS_REGISTRY: dict[str, tuple[SettingTarget, Callable[[Any], bytes]]] = {
     "trigger_delay_ms": (TRIGGER_DELAY_MS, encode_trigger_delay_ms),
     "exposure_time_us": (EXPOSURE_TIME, encode_exposure_time_us),
