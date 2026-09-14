@@ -5,9 +5,9 @@
 
 # The MQTT client ships as a wheel in app/dependencies/ - main.py imports it
 # at module level, so it must be installed for the service to start at all.
-mqtt-client @ file:./app/dependencies/mqtt_client-1.0.0-py3-none-any.whl#sha256=3f9abdaad96aad5951e05d9d863f6a8058458ca3eb27d03a6a282bbefae863d6
+./app/dependencies/mqtt_client-1.0.0-py3-none-any.whl
 
-numpy==1.26.4
+
 # headless build: this service never calls imshow/waitKey, and plain
 # opencv-python needs libGL.so.1, which no CI runner or container has.
 opencv-python-headless==4.11.0.86

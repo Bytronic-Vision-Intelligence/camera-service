@@ -437,7 +437,7 @@ the head is triggered from its TRG terminal and ``main.py`` drains
             except Exception:
                 logger.error("Failed to decode LJ-S height data", exc_info=True)
 
-    def capture_image(self, timeout_s: Optional[float] = None) -> np.ndarray:
+    def capture_image(self, timeout_ms: Optional[float] = None) -> np.ndarray:
         """Software-trigger one scan and return its height map (mm, NaN = invalid).
 
         ``main.py`` calls this for ``camera_type: ljs`` when
@@ -446,7 +446,7 @@ the head is triggered from its TRG terminal and ``main.py`` drains
         if not self._connected:
             raise RuntimeError("LJSCamera is not connected")
 
-        timeout = self.timeout_s if timeout_s is None else float(timeout_s)
+        timeout = self.timeout_s if timeout_ms is None else float(timeout_ms) / 1000.0
         deadline = time.monotonic() + timeout
 
         status = ctypes.c_ushort()

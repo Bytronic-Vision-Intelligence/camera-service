@@ -196,6 +196,48 @@ class GigeCamera(Camera):
                 self.harvester = None
             raise RuntimeError("Error finding camera: " + str(e)) from e
 
+    def _set_exposure(self, camera, exposure=None) -> None:
+        """Set ``ExposureTime`` (us). Defaults to ``camera_settings`` when omitted."""
+        if exposure is None:
+            cfg = self.camera_settings or {}
+            exposure = cfg.get("exposure_time_us", cfg.get("exposure_time"))
+        if exposure is None or str(exposure).strip() == "":
+            return
+
+        nm = camera.remote_device.node_map
+        try:
+            try:
+                nm.ExposureAuto.value = "Off"
+            except Exception:
+                logging.debug("ExposureAuto not settable; continuing", exc_info=True)
+            try:
+                nm.ExposureMode.value = "Timed"
+            except Exception:
+                logging.debug("ExposureMode not settable; continuing", exc_info=True)
+            nm.ExposureTime.value = float(exposure)
+            logging.info("ExposureTime set to %s us", nm.ExposureTime.value)
+        except Exception as e:
+            raise RuntimeError(f"Failed setting ExposureTime={exposure}") from e
+
+    def _set_gain(self, camera, gain=None) -> None:
+        """Set ``Gain``. Defaults to ``camera_settings`` when omitted."""
+        if gain is None:
+            cfg = self.camera_settings or {}
+            gain = cfg.get("gain")
+        if gain is None or str(gain).strip() == "":
+            return
+
+        nm = camera.remote_device.node_map
+        try:
+            try:
+                nm.GainAuto.value = "Off"
+            except Exception:
+                logging.debug("GainAuto not settable; continuing", exc_info=True)
+            nm.Gain.value = float(gain)
+            logging.info("Gain set to %s", nm.Gain.value)
+        except Exception as e:
+            raise RuntimeError(f"Failed setting Gain={gain}") from e
+
     def _apply_camera_settings(self, camera) -> None:
         """Apply optional ``camera_settings`` from the nested config (no trigger setup)."""
         nm = camera.remote_device.node_map
@@ -213,6 +255,9 @@ class GigeCamera(Camera):
             self.pixel_format = str(nm.PixelFormat.value)
         except Exception:
             self.pixel_format = pixel_format or None
+
+        self._set_exposure(camera)
+        self._set_gain(camera)
 
     def _apply_lights_settings(self, camera) -> None:
         """Apply optional ``lights`` config (digital output / strobe line)."""
@@ -426,10 +471,21 @@ class GigeCamera(Camera):
             with camera.fetch(timeout=timeout_ms / 1000.0) as buffer:
                 component = buffer.payload.components[0]
                 raw = np.asarray(component.data)
+                h = int(component.height)
+                w = int(component.width)
                 if raw.ndim >= 2:
                     img = raw.copy()
                 else:
-                    img = raw.reshape(int(component.height), int(component.width)).copy()
+                    # Mono/Bayer: H*W; packed RGB/BGR: H*W*C
+                    plane = h * w
+                    if raw.size == plane:
+                        img = raw.reshape(h, w).copy()
+                    elif plane and raw.size % plane == 0:
+                        img = raw.reshape(h, w, raw.size // plane).copy()
+                    else:
+                        raise ValueError(
+                            f"Unexpected buffer size {raw.size} for {h}x{w}"
+                        )
         except Exception as e:
             logging.error("fetch raised an exception")
             raise RuntimeError("Failed to grab image") from e
@@ -443,6 +499,9 @@ class GigeCamera(Camera):
                 img = cv2.cvtColor(img, cv2.COLOR_BayerGR2BGR)
             elif "BayerBG" in self.pixel_format:
                 img = cv2.cvtColor(img, cv2.COLOR_BayerBG2BGR)
+            elif self.pixel_format.startswith("RGB"):
+                # Match Bayer path: return BGR for OpenCV / archive consumers
+                img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
 
         logging.info("Captured image shape: %s", getattr(img, "shape", None))
         return np.asarray(img)
