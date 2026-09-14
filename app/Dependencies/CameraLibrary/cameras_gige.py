@@ -1,6 +1,6 @@
 from harvesters.core import Harvester
-from Dependencies.CameraLibrary.cameras import Camera
-from Dependencies import loadConfig
+from dependencies.CameraLibrary.cameras import Camera
+from dependencies import loadConfig
 from queue import Queue
 from threading import Event
 import logging
@@ -102,6 +102,26 @@ class GigeCamera(Camera):
                     logging.debug("Ignoring harvester reset failure during camera discovery error handling.", exc_info=True)
                 self.harvester = None
             raise RuntimeError("Error finding camera: " + str(e)) from e
+
+    def set_exposure_time(exposure_time, camera):
+        '''updates the current exposure time
+        Args:
+            exposure_time: the exposure time in ms
+            camera: the camera instance
+        '''
+        nodemap = camera.remote_device.node_map
+        if "ExposureAuto" in nodemap:
+            nodemap.ExposureAuto.value = "Off"
+        if "ExposureTime" in nodemap:
+            min_exp = nodemap.ExposureTime.min
+            max_exp = nodemap.ExposureTime.max
+            if exposure_time < min_exp or exposure_time > max_exp:
+                print(f"Error : Exposure out of range ({min_exp} - {max_exp} µs).")
+                return False
+            nodemap.ExposureTime.value = exposure_time
+
+        print(f"Info : Exposure set to {nodemap.ExposureTime.value} µs")
+        return True
 
     def _apply_camera_settings(self, camera) -> None:
         """Apply optional ``camera_settings`` from the nested config (no trigger setup)."""
