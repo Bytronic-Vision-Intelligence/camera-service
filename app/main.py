@@ -287,6 +287,46 @@ def _capture_and_publish(
     )
 
 
+def _parse_mqtt_dict(message) -> dict | None:
+    """Best-effort JSON object from an MQTT payload."""
+    if isinstance(message, dict):
+        return message
+    text = ""
+    if isinstance(message, (bytes, bytearray)):
+        text = bytes(message).decode("utf-8", errors="replace")
+    elif isinstance(message, str):
+        text = message
+    else:
+        text = str(message) if message is not None else ""
+    if not text:
+        return None
+    try:
+        parsed = json.loads(text)
+    except (JSONDecodeError, TypeError):
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
+def trigger_delay_from_message(message, camera_id: str) -> float | None:
+    """Return capture delay if ``message`` triggers this ``camera_id``, else None.
+
+    Expects ``{camera_id: [trigger, delay, ...]}`` with delay at index 1.
+    """
+    data = _parse_mqtt_dict(message)
+    if not data or not camera_id or camera_id not in data:
+        return None
+
+    value = data.get(camera_id)
+    if not isinstance(value, (list, tuple)) or len(value) < 2:
+        return None
+    if "trigger" not in str(value[0]).lower():
+        return None
+    try:
+        return float(value[1])
+    except (TypeError, ValueError):
+        return None
+
+
 def run_software_single(
     mqtt_config,
     topics,
@@ -298,20 +338,24 @@ def run_software_single(
     archive_config,
     stop_event: Event,
 ) -> list:
-    """MQTT trigger message → one software capture."""
+    """MQTT trigger message → one software capture for this camera_id."""
     threads = start_subscribers(mqtt_config, topics, stop_event)
     event_queue = trigger_queue_from_topics(topics)
     if event_queue is None:
         raise SystemExit("software/single requires a subscribed trigger topic")
 
+    camera_id = str(require(camera_config, "camera_id"))
     time.sleep(0.1)
     while not stop_event.is_set():
         try:
             message = event_queue.get(timeout=1.0)
         except Empty:
             continue
-        if message is None or "trigger" not in str(message):
+        delay = trigger_delay_from_message(message, camera_id)
+        if delay is None:
             continue
+        if delay > 0:
+            time.sleep(delay)
         _capture_and_publish(
             client, camera, camera_config, image_outputs,
             base_image_topic, archive_config,

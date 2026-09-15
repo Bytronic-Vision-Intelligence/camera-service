@@ -159,7 +159,7 @@ class GigeCamera(Camera):
             devices = h.device_info_list
             if not devices:
                 h.reset()
-                raise RuntimeError("No GigE cameras detected")
+                raise RuntimeError("Error : No GigE cameras detected")
 
             matched = None
             for i, info in enumerate(devices):
@@ -335,7 +335,7 @@ class GigeCamera(Camera):
                 exc,
             )
 
-    def connect_to_camera(self, timeout_ms: int = 5000):
+    def connect_to_camera(self, timeout_ms: int = 10000):
         # Connect to the camera and return the camera object.
         # Function returns the camera object.
         timeout_s = timeout_ms / 1000.0

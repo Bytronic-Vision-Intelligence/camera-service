@@ -271,3 +271,29 @@ def test_main_refuses_an_empty_config_path(monkeypatch):
     monkeypatch.setattr(main.loadConfig, "_ACTIVE", None)
     with pytest.raises(SystemExit, match="--config is required"):
         main.main(["--config", ""])
+
+
+def test_trigger_delay_from_message_uses_camera_id_list():
+    payload = {
+        "colour_1": ["trigger", 0.5],
+        "depth_1": ["trigger", 0.0],
+        "database_instruction": "search_database",
+    }
+    assert main.trigger_delay_from_message(payload, "colour_1") == 0.5
+    assert main.trigger_delay_from_message(payload, "depth_1") == 0.0
+    assert main.trigger_delay_from_message(payload, "other") is None
+
+
+def test_trigger_delay_from_message_requires_delay_at_index_1():
+    assert main.trigger_delay_from_message({"colour_1": "trigger"}, "colour_1") is None
+    assert main.trigger_delay_from_message({"colour_1": ["trigger"]}, "colour_1") is None
+
+
+def test_trigger_delay_from_message_ignores_other_camera_json_string():
+    raw = (
+        '{"colour_1": ["trigger", 0.5], "depth_1": ["trigger", 0.0], '
+        '"lights_instruction": ["trigger", 0.5, 0.2]}'
+    )
+    assert main.trigger_delay_from_message(raw, "depth_1") == 0.0
+    assert main.trigger_delay_from_message(raw, "colour_1") == 0.5
+    assert main.trigger_delay_from_message(raw, "missing") is None
