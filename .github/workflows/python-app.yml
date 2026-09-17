@@ -1,7 +1,7 @@
 # Installs dependencies, lints with flake8 and runs the pytest suite.
 # https://docs.github.com/en/actions/automating-builds-and-tests/building-and-testing-python
 #
-# Rename `name:` below when you clone this template into a new service.
+# Local CI: ./docker-local/run.sh
 # Run it locally before opening a PR with ./docker-local/run.sh
 
 name: camera-service
@@ -23,6 +23,10 @@ jobs:
   build:
     name: build (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    # Backstop for anything pytest-timeout cannot cap - a stalled pip
+    # resolve, a wheel download that never completes. Without it a hung job
+    # holds a runner until GitHub's 6-hour default.
+    timeout-minutes: 30
 
     strategy:
       fail-fast: false
@@ -40,8 +44,44 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install flake8 pytest
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          pip install flake8
+          # requirements-dev.txt pulls in requirements.txt via `-r`, so this
+          # installs both. Runtime deps are kept separate because everything in
+          # requirements.txt is built into the shipped binary.
+          if [ -f requirements-dev.txt ]; then pip install -r requirements-dev.txt; fi
+          # The signing tests import cryptography, which the service itself
+          # never needs and so is not a runtime dependency.
+          if [ -f requirements-signing.txt ]; then pip install -r requirements-signing.txt; fi
+
+      - name: Guard against case-only rename drift
+        run: |
+          # macOS and Windows are case-insensitive, so a file can stay tracked
+          # as Test_foo.py while the working tree shows test_foo.py. A Linux
+          # runner then checks out the capitalised name, which pytest's default
+          # test_*.py pattern does not collect - the suite silently shrinks and
+          # CI still reports success.
+          stray=$(git ls-files | grep -E '(^|/)Test_[^/]*\.py$' || true)
+          if [ -n "$stray" ]; then
+            echo "::error::These test files are tracked with capitalised names and will not be collected:"
+            echo "$stray"
+            exit 1
+          fi
+          echo "No capitalised test files tracked."
+
+      - name: Guard against case-only rename drift
+        run: |
+          # macOS and Windows are case-insensitive, so a file can stay tracked
+          # as Test_foo.py while the working tree shows test_foo.py. A Linux
+          # runner then checks out the capitalised name, which pytest's default
+          # test_*.py pattern does not collect - the suite silently shrinks and
+          # CI still reports success.
+          stray=$(git ls-files | grep -E '(^|/)Test_[^/]*\.py$' || true)
+          if [ -n "$stray" ]; then
+            echo "::error::These test files are tracked with capitalised names and will not be collected:"
+            echo "$stray"
+            exit 1
+          fi
+          echo "No capitalised test files tracked."
 
       - name: Lint with flake8
         run: |

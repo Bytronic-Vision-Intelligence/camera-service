@@ -1,47 +1,27 @@
-# app
+# Application
 
-This folder contains the main application logic for the Example Camera Worker.
+`main.py` is the entrypoint. It runs the config named by `--config`, connects
+the camera backend, then either:
 
-## Purpose
+- starts MQTT subscribers on `is_subscribe` topics (software trigger), or
+- starts a `wait_for_frame` thread (hardware / continuous FLIR/dummy)
 
-The `app` package launches the MQTT-based camera worker and manages the capture workflow.
+and publishes formatted image packets on the `image` topic base.
 
-## Main entrypoint
+## Domain modules
 
-- `app/main.py` is the primary script.
-- It loads configuration values from `app/dependencies/config.yaml`.
-- It initializes the requested camera implementation and connects to the MQTT broker.
-- It listens for trigger messages and publishes captured images to the configured image topic.
-
-## Configuration
-
-The app uses `app/dependencies/loadConfig.py` to read YAML values from `app/dependencies/config.yaml`.
-
-Required config keys:
-
-- `ip`
-- `port`
-- `trigger_topic`
-- `image_topic`
-- `camera_type`
-
-Optional keys:
-
-- `message`
-
-## Camera types
-
-- `opencv`: uses `cv2.VideoCapture(0)` to capture from the local webcam.
-- `pylon`: imports `MQTT_Objects.Classes.mqtt_Camera_PylonClass.PylonClass` and expects that package to be installed and available.
+| Path | Purpose |
+|---|---|
+| `CameraLibrary/` | opencv, dummy, gige, flir, pylon, ljs backends |
+| `image_functions.py` | format, encode, multi-output topics |
+| `archive_functions.py` | optional disk archive |
+| `loadConfig.py` | required `--config` only; domain knobs injected into cameras |
+| `logging_setup.py` | stdout logging for the orchestrator |
 
 ## Running
 
-```powershell
-python app/main.py
+```bash
+python main.py --config ../config.yaml
 ```
 
-## Notes
-
-- The worker uses a background asyncio event loop to listen for capture requests.
-- Captured images are resized to `6400x4800` before publishing.
-- If the configured `camera_type` is unsupported, the app raises a `ValueError`.
+See the repository [README](../Readme.md).

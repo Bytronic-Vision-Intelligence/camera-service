@@ -1,0 +1,205 @@
+# Builds a signed, per-platform release of this service.
+#
+# The artefact names come from the repository name, so the four lines that
+# differed between the first two hand-copied pipelines cannot drift here.
+#
+# TRIGGER: pushes to `prod`, and nothing else.
+#
+#   GitHub runs a branch-triggered workflow AS IT EXISTS ON THE BRANCH THAT WAS
+#   PUSHED. A `prod` branch created before this file existed does not contain
+#   it, so pushing to `prod` runs whatever workflows that branch does have and
+#   this one silently never fires -- no error, no run, no release. That is why
+#   two finished pipelines in this org have never produced a release. Keep
+#   `prod` current with `main`.
+#
+#   There is deliberately no `pull_request` trigger. Three of the service
+#   repositories are PUBLIC, and a workflow reachable from a fork's pull
+#   request must never be able to reach SERVICE_SIGNING_KEY. Pinned by
+#   test/test_release_pipeline.py::test_nothing_but_a_push_to_prod_triggers_a_release
+name: camera-service release
+
+on:
+  push:
+    branches: [ "prod" ]
+
+permissions:
+  contents: write
+
+env:
+  # The service's entry script, named once. The build passes it to PyInstaller;
+  # packaging derives the binary's name from it to restore the executable bit.
+  # Two copies of this would silently disagree the day a service renames it.
+  SCRIPT: app/main.py
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  build:
+    name: Build ${{ matrix.platform }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+
+    # No secret is available to this job, by design. The signing key is needed
+    # on exactly one runner, so it is used in `release` instead and never
+    # reaches the build legs.
+    #
+    # macOS is deliberately not built: no customer runs one. It also removes
+    # the Gatekeeper problem, which an unsigned macOS binary hits on first
+    # launch -- "cannot be opened because the developer cannot be verified" --
+    # and which only an Apple Developer certificate solves. Add the leg back
+    # alongside that certificate, not before it.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux-amd64
+            runner: ubuntu-latest
+          - platform: windows-amd64
+            runner: windows-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Verify project structure
+        run: |
+          set -euo pipefail
+          test -f app/main.py
+          test -f requirements.txt
+          test -d app/dependencies
+          test -f config.example.yaml
+          echo "Layout looks like a Bytronic service."
+
+      # Pinned to a commit rather than @master: this action turns source into
+      # the binary a customer runs, so "whatever master is today" is a change
+      # to a shipped artefact that no one here reviewed.
+      - name: Build application
+        uses: espressif/python-binary-action@b7d9c899ef131570d6be8b7ba7c8d21f9b268c82
+        with:
+          scripts: ${{ env.SCRIPT }}
+          output-dir: "./dist/${{ matrix.platform }}"
+          target-platform: ${{ matrix.platform }}
+          # requirements.txt is runtime-only, so the binary does not carry a
+          # test framework around with it.
+          install-deps-command: >-
+            uv pip install
+            -r requirements.txt
+          # app/main.py imports `dependencies`, which resolves at runtime only
+          # because Python puts a script's own directory on sys.path. PyInstaller
+          # is invoked from the repository root, so without this it analyses
+          # main.py with only the root on the search path, cannot resolve
+          # `dependencies`, and builds a binary that dies on its first import.
+          # It BUILDS cleanly -- the failure appears when the binary is run.
+          # Pinned by
+          # test/test_release_pipeline.py::test_the_build_puts_app_on_the_import_path
+          additional-args: --paths app
+          include-data-dirs: |
+            {
+              "*": [
+                "./app/dependencies"
+              ]
+            }
+
+      - name: Add the editable config
+        run: |
+          set -euo pipefail
+          output_dir="./dist/${{ matrix.platform }}"
+          # Beside the executable, which is exactly where the service reads
+          # it from. The orchestrator overwrites it on deployment; this copy is
+          # the documented starting point. It is tracked as config.example.yaml
+          # so that the config.yaml the orchestrator writes into a checkout can
+          # stay ignored -- this repository is public.
+          cp config.example.yaml "$output_dir/config.yaml"
+
+      - name: Verify build output
+        run: |
+          set -euo pipefail
+          output_dir="./dist/${{ matrix.platform }}"
+          test -f "$output_dir/config.yaml"
+          test "$(find "$output_dir" -type f | wc -l)" -gt 1
+
+      # include-hidden-files, because v4 excludes dotfiles by default and a
+      # service that ships one would lose it silently. logs/ no longer depends
+      # on this -- scripts/package.sh creates it at packaging time -- but the
+      # default is a trap worth closing rather than rediscovering. Pinned by
+      # test/test_release_pipeline.py::test_the_upload_keeps_hidden_files
+      - name: Upload platform artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-${{ matrix.platform }}
+          path: "./dist/${{ matrix.platform }}"
+          include-hidden-files: true
+          if-no-files-found: error
+
+  release:
+    name: Sign and publish
+    runs-on: ubuntu-latest
+    needs: build
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install signing dependencies
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          pip install -r requirements-signing.txt
+
+      - name: Download built binaries
+        uses: actions/download-artifact@v4
+        with:
+          path: build
+
+      # The logic is in scripts/package.sh so CI and the local runner execute
+      # the SAME code. It repairs damage done between the build job and this
+      # one -- a lost executable bit, a missing logs/ -- which is exactly the
+      # kind of thing a reimplementation in a test would not catch.
+      - name: Package each platform
+        env:
+          SERVICE: ${{ github.event.repository.name }}
+          SCRIPT: ${{ env.SCRIPT }}
+        run: |
+          set -euo pipefail
+          ./scripts/package.sh build upload "$SERVICE" "$SCRIPT"
+
+      # The only step that sees the signing key. It refuses to sign unless the
+      # secret's public half matches the one committed in scripts/sign.py, so a
+      # secret pasted from the wrong place fails here rather than on a customer
+      # machine months later.
+      - name: Sign the release artefacts
+        env:
+          SERVICE_SIGNING_KEY: ${{ secrets.SERVICE_SIGNING_KEY }}
+        run: |
+          set -euo pipefail
+          python scripts/sign.py upload/*.zip
+          ls -l upload/*.sig
+
+      - name: Generate checksums
+        run: |
+          set -euo pipefail
+          cd upload && sha256sum *.zip *.sig > SHA256SUMS && cat SHA256SUMS
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: prod-${{ github.run_number }}
+        run: |
+          set -euo pipefail
+          gh release create "$TAG" \
+            --title "Production build ${TAG#prod-}" \
+            --generate-notes \
+            upload/*.zip upload/*.sig upload/SHA256SUMS

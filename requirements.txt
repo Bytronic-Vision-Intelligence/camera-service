@@ -1,13 +1,18 @@
+# Runtime dependencies only. Everything listed here is installed into the
+# release build and ends up inside the shipped binary, so a package that is
+# only needed to develop or test the service belongs in requirements-dev.txt
+# instead -- otherwise every customer receives a copy of it.
+
 # The MQTT client ships as a wheel in app/dependencies/ - main.py imports it
 # at module level, so it must be installed for the service to start at all.
 ./app/dependencies/mqtt_client-1.0.0-py3-none-any.whl
 
-numpy==1.26.4
+
 # headless build: this service never calls imshow/waitKey, and plain
 # opencv-python needs libGL.so.1, which no CI runner or container has.
 opencv-python-headless==4.11.0.86
 paho-mqtt==2.1.0
-pillow==12.2.0
+pillow==12.3.0
 pypylon==26.5.0
 harvesters==1.4.3
 PyYAML==6.0.3

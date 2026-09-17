@@ -1,0 +1,68 @@
+# pylon: a Basler camera over pypylon.
+#
+# Reference only -- nothing loads this file. See ../../config.example.yaml for
+# the annotated shape.
+
+project: indonesia
+
+mqtt:
+  mqtt_ip: localhost
+  mqtt_port: 1883
+  qos: 1
+
+  # {project} / {camera_id} are filled from project / service.camera at startup.
+  topics:
+    - name: trigger
+      topic: "{project}/camera/{camera_id}/trigger"
+      is_subscribe: true
+      is_trigger: true
+
+    - name: image
+      topic: "{project}/camera/{camera_id}/image"
+      is_subscribe: false
+
+service:
+  camera:
+    camera_type: pylon
+    camera_id: 1
+    # Milliseconds, passed to GrabOne. Pylon honours this one.
+    capture_timeout: 5000
+    # Optional. Unset, the first Basler device found is opened.
+    # serial_number: "24810123"
+
+  camera_settings:
+    buffer_size: 0
+    # Reserved: _apply_camera_settings is a no-op for pylon today.
+
+  # trigger_type: software | hardware
+  # capture_type: single | continuous
+  #
+  # software + single     → MQTT trigger → one capture
+  # software + continuous → MQTT on/off arms a timed capture stream
+  # hardware + single     → camera line/edge IO → one frame
+  # hardware + continuous → camera free-run stream
+  #
+  # (Legacy: internal/software → software + single;
+  #  external/hardware → hardware + single)
+  trigger:
+    trigger_type: software
+    capture_type: single
+
+  images:
+    - default:
+        image_format: null
+        topic_end: null
+        archive: true
+
+  lights: {}
+
+  archiving:
+    is_archived: true
+    archive_directory: "save_dir"
+    archive_parameters:
+      archive_freq: "daily"
+      archive_storage: 50       # GB
+      archive_days: 30          # days
+
+logging:
+  level: INFO

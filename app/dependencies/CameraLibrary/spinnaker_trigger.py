@@ -54,9 +54,9 @@ class SpinnakerHardwareTrigger:
       - ``off``: free-run / software path
     """
 
-    def __init__(self, cam, config: Optional[HardwareTriggerConfig] = None):
+    def __init__(self, cam, config: HardwareTriggerConfig):
         self._cam = cam
-        self.config = config or HardwareTriggerConfig.from_app_config()
+        self.config = config
         self.mode = "off"  # off | native | gpio_poll
         self._last_line_status: Optional[bool] = None
 

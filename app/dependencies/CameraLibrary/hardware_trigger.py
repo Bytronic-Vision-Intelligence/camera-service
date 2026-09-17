@@ -1,4 +1,4 @@
-"""Reusable external / hardware trigger helpers for camera backends.
+"""Reusable hardware trigger helpers for camera backends.
 
 Vendor-specific setup lives in ``spinnaker_trigger``.
 Shared pieces here: config loading, edge detection, and the GPIO poll loop.
@@ -14,8 +14,6 @@ from threading import Event
 from typing import Callable, Optional
 
 import numpy as np
-
-from dependencies import loadConfig
 
 logger = logging.getLogger(__name__)
 
@@ -42,10 +40,9 @@ def is_camera_loss_error(exc: BaseException) -> bool:
 
 
 def report_camera_loss(exc: BaseException, *, queue: Optional[Queue] = None) -> CameraLossError:
-    """Log/print a single CAMERA LOSS report and optionally enqueue it for main."""
+    """Log a single CAMERA LOSS report and optionally enqueue it for main."""
     loss = CameraLossError(str(exc))
     logger.critical("CAMERA LOSS: %s", exc)
-    print(f"CAMERA LOSS: {exc}", flush=True)
     if queue is not None:
         try:
             queue.put(loss)
@@ -56,7 +53,7 @@ def report_camera_loss(exc: BaseException, *, queue: Optional[Queue] = None) -> 
 
 @dataclass(frozen=True)
 class HardwareTriggerConfig:
-    """Settings for an external light-gate / GPIO trigger."""
+    """Settings for a hardware light-gate / GPIO trigger."""
 
     enabled: bool = False
     source: str = "Line0"
@@ -65,11 +62,18 @@ class HardwareTriggerConfig:
 
     @classmethod
     def from_app_config(cls, cfg: Optional[dict] = None) -> "HardwareTriggerConfig":
+        """Build from an injected trigger section.
+
+        Hardware single-shot arms GenICam/GPIO edge capture.
+        Hardware continuous / software leave TriggerMode off (free-run or SW).
+        """
         if cfg is None:
-            cfg = loadConfig.get_section("trigger")
-        trigger_type = str(cfg.get("trigger_type", "")).lower()
+            cfg = {}
+        trigger_type = str(cfg.get("trigger_type", "")).strip().lower()
+        capture_type = str(cfg.get("capture_type", "single")).strip().lower()
+        enabled = trigger_type == "hardware" and capture_type == "single"
         return cls(
-            enabled=trigger_type == "external",
+            enabled=enabled,
             source=str(cfg.get("trigger_source", "Line0")),
             activation=str(cfg.get("trigger_activation", "RisingEdge")),
             poll_interval_s=float(cfg.get("trigger_poll_interval_s", 0.001)),

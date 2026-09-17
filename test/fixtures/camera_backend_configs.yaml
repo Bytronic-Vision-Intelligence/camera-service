@@ -1,0 +1,91 @@
+# Camera backend presets for camera-service/test/test_camera_backends.py.
+
+mqtt:
+  mqtt_ip: localhost
+  mqtt_port: 1883
+  qos: 1
+  topics:
+    - name: trigger
+      topic: project/camera/camera_id/trigger
+      is_subscribe: true
+      is_trigger: true
+    - name: image
+      topic: project/camera/camera_id/image
+      is_subscribe: false
+
+trigger:
+  trigger_type: software
+  capture_type: single
+
+lights: {}
+
+archiving:
+  is_archived: true
+  archive_directory: "../data/images"
+  archive_parameters:
+    archive_freq: daily
+    archive_storage: 50
+    archive_days: 30
+
+camera_types:
+  dummy:
+    camera_type: dummy
+    camera_id: camera_id
+    dummy_location: "../data/dummy_camera/colour"
+    file_type: ".bmp"
+    capture_timeout: 1000
+
+  opencv:
+    camera_type: opencv
+    camera_id: camera_id
+    capture_timeout: 10
+
+  gige:
+    camera_type: gige
+    camera_id: camera_id
+    capture_timeout: 10
+    camera_ip: 192.168.5.1
+    serial_number: "21627618"
+    cti_path: "C:\\Program Files\\Baumer\\Baumer GAPI SDK\\bin\\bgapi2_gige.cti"
+    camera_settings:
+      pixel_format: BayerRG8
+
+  flir:
+    camera_type: flir
+    camera_id: camera_id
+    camera_ip: 192.168.5.1
+    serial_number: "89901703"
+    capture_timeout: 10
+    camera_settings:
+      buffer_size: 0
+      pixel_format: Mono14
+      cmos_bit_depth: bit14bit
+      temperature_linear_mode: true
+
+  pylon:
+    camera_type: pylon
+    camera_id: camera_id
+    capture_timeout: 1000
+    camera_ip: 192.168.1.10
+    serial_number: "21540563"
+    camera_settings:
+      buffer_size: 0
+
+  ljs:
+    camera_type: ljs
+    camera_id: camera_id
+    capture_timeout: 5000
+    camera_ip: "192.168.0.1"
+    port: 24691
+    high_speed_port: 24692
+    device_id: 0
+    program: 0
+    use_image_filter: false
+    interpolate_y: 4
+    camera_settings:
+      exposure_time_us: 640
+      dynamic_range: 4
+      light_control_mode: AUTO
+      light_control_upper: 90
+      light_control_lower: 10
+      detection_sensitivity: 3

@@ -10,6 +10,7 @@ from cv2 import imwrite
 #   stored = round(mm * RAW_PNG_MM_SCALE) + 32768
 # Recover with decode_raw_height_png() / (img.astype(float) - 32768) / RAW_PNG_MM_SCALE
 RAW_PNG_MM_SCALE = 100.0  # 0.01 mm resolution
+BIT_SCALE_15 = 32768.0
 
 
 def _archive_save_dir(directory, archive_params: dict, camera_id=None) -> str | None:
@@ -37,7 +38,7 @@ def _archive_save_dir(directory, archive_params: dict, camera_id=None) -> str | 
     if subfolder:
         path_parts.append(subfolder)
     if camera_id is not None:
-        path_parts.append(f"cam{camera_id}")
+        path_parts.append(f"cam_{camera_id}")
     save_directory = os.path.join(*path_parts)
     os.makedirs(save_directory, exist_ok=True)
     return save_directory
@@ -65,7 +66,7 @@ def prepare_raw_png(image: np.ndarray) -> np.ndarray:
     if np.issubdtype(arr.dtype, np.floating):
         out = np.zeros(arr.shape, dtype=np.uint16)
         valid = np.isfinite(arr)
-        encoded = np.rint(arr[valid] * RAW_PNG_MM_SCALE) + 32768.0
+        encoded = np.rint(arr[valid] * RAW_PNG_MM_SCALE) + BIT_SCALE_15
         out[valid] = np.clip(encoded, 1, 65535).astype(np.uint16)
         return out
 
@@ -77,7 +78,7 @@ def decode_raw_height_png(image: np.ndarray) -> np.ndarray:
     arr = np.asarray(image)
     if arr.ndim == 3 and arr.shape[2] == 1:
         arr = arr[:, :, 0]
-    mm = (arr.astype(np.float32) - 32768.0) / np.float32(RAW_PNG_MM_SCALE)
+    mm = (arr.astype(np.float32) - BIT_SCALE_15) / np.float32(RAW_PNG_MM_SCALE)
     mm[arr == 0] = np.nan
     return mm
 
