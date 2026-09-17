@@ -195,7 +195,8 @@ def test_main_software_single_captures_and_publishes(monkeypatch):
     monkeypatch.setattr(main, "set_camera_class", lambda *a, **k: fake_camera)
 
     def fake_start(ip, port, topic, queue, stop_event):
-        queue.put('{"command": "trigger"}')
+        # Matches run_software_single: {camera_id: ["trigger", delay]}
+        queue.put('{"colour": ["trigger", 0.0]}')
         return FakeThread()
 
     monkeypatch.setattr(main, "start_subscribe_thread", fake_start)
