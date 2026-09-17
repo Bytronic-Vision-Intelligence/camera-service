@@ -98,7 +98,7 @@ class LJSCamera(CameraHeightMap):
     LJ-S8000 3D laser profile head, compatible with the CameraHeightMap interface.
 
     Usage:
-        ljs = LJSCamera()                 # reads camera.ljs.* from config.yaml
+        ljs = LJSCamera()                 # reads service.camera / camera_settings
         ljs.connect_to_camera()           # opens the head, applies settings,
                                            # and starts the high-speed stream
         height_mm = ljs.capture_image()   # 2D float32 array in mm, NaN = no data
@@ -109,9 +109,11 @@ calls ``capture_image()`` (software ``LJS8IF_Trigger``). With ``hardware``,
 the head is triggered from its TRG terminal and ``main.py`` drains
 ``wait_for_frame()`` on a background thread.
 
-    Any keyword arguments override the matching ``camera.ljs.*`` config key
-    (host, port, high_speed_port, device_id, program, timeout_s,
-    use_image_filter, interpolate_y, settings).
+    Connection keys live on ``service.camera`` (same shape as gige/flir):
+    ``camera_ip``, ``port``, ``high_speed_port``, ``device_id``, ``program``,
+    ``timeout_s``, ``use_image_filter``, ``interpolate_y``. Program settings
+    come from ``service.camera_settings``. Keyword arguments override matching
+    connection keys (and ``settings``).
     """
 
     def __init__(self, **overrides: Any) -> None:
@@ -142,29 +144,39 @@ the head is triggered from its TRG terminal and ``main.py`` drains
         self._raw_queue: Queue = Queue()
 
     def _apply_ljs_config(self) -> None:
-        cfg = dict((self.camera_config or {}).get("ljs") or {})
-        cfg.update(self._overrides)
+        camera = dict(self.camera_config or {})
+        camera.update(self._overrides)
 
-        self.host = str(cfg.get("host", "192.168.0.1"))
-        self.port = int(cfg.get("port", 24691))
-        self.high_speed_port = int(cfg.get("high_speed_port", 24692))
+        self.host = str(camera.get("camera_ip") or "192.168.0.1")
+        self.port = int(camera.get("port", 24691))
+        self.high_speed_port = int(camera.get("high_speed_port", 24692))
         if self.port == self.high_speed_port:
             raise ValueError(
-                "camera.ljs.port and camera.ljs.high_speed_port must differ "
+                "LJS port and high_speed_port must differ "
                 f"(both are {self.port})"
             )
-        self.device_id = int(cfg.get("device_id", 0))
-        self.program = int(cfg.get("program", 0))
+        self.device_id = int(camera.get("device_id", 0))
+        self.program = int(camera.get("program", 0))
         if not 0 <= self.program <= 15:
-            raise ValueError(f"camera.ljs.program must be 0-15, got {self.program}")
-        self.timeout_s = float(cfg.get("timeout_s", 5.0))
-        self.use_image_filter = bool(cfg.get("use_image_filter", False))
-        self.interpolate_y = int(cfg.get("interpolate_y", 1))
+            raise ValueError(f"LJS program must be 0-15, got {self.program}")
+        if camera.get("timeout_s") is not None:
+            self.timeout_s = float(camera["timeout_s"])
+        elif camera.get("capture_timeout") is not None:
+            self.timeout_s = float(camera["capture_timeout"]) / 1000.0
+        else:
+            self.timeout_s = 5.0
+        self.use_image_filter = bool(camera.get("use_image_filter", False))
+        self.interpolate_y = int(camera.get("interpolate_y", 1))
         if not 1 <= self.interpolate_y <= 8:
             raise ValueError(
-                f"camera.ljs.interpolate_y must be 1-8, got {self.interpolate_y}"
+                f"LJS interpolate_y must be 1-8, got {self.interpolate_y}"
             )
-        self.settings = dict(cfg.get("settings") or {})
+
+        settings = dict(self.camera_settings or {})
+        override_settings = self._overrides.get("settings")
+        if isinstance(override_settings, dict):
+            settings.update(override_settings)
+        self.settings = settings
 
     # -- connection lifecycle ------------------------------------------------
 
@@ -437,7 +449,7 @@ the head is triggered from its TRG terminal and ``main.py`` drains
             except Exception:
                 logger.error("Failed to decode LJ-S height data", exc_info=True)
 
-    def capture_image(self, timeout_s: Optional[float] = None) -> np.ndarray:
+    def capture_image(self, timeout_ms: Optional[float] = None) -> np.ndarray:
         """Software-trigger one scan and return its height map (mm, NaN = invalid).
 
         ``main.py`` calls this for ``camera_type: ljs`` when
@@ -446,7 +458,7 @@ the head is triggered from its TRG terminal and ``main.py`` drains
         if not self._connected:
             raise RuntimeError("LJSCamera is not connected")
 
-        timeout = self.timeout_s if timeout_s is None else float(timeout_s)
+        timeout = self.timeout_s if timeout_ms is None else float(timeout_ms) / 1000.0
         deadline = time.monotonic() + timeout
 
         status = ctypes.c_ushort()

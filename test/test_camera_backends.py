@@ -22,7 +22,7 @@ TYPE_REQUIRED = {
     "gige": {"serial_number", "cti_path"},
     "flir": {"serial_number"},
     "pylon": {"serial_number"},
-    "ljs": {"ljs"},
+    "ljs": {"camera_ip"},
 }
 
 HW_TYPES = {"opencv", "gige", "flir", "pylon", "ljs"}

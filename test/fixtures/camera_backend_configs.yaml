@@ -75,12 +75,17 @@ camera_types:
     camera_type: ljs
     camera_id: camera_id
     capture_timeout: 5000
-    ljs:
-      host: "192.168.0.1"
-      port: 24691
-      high_speed_port: 24692
-      device_id: 0
-      program: 0
-      timeout_s: 5.0
-      use_image_filter: false
-      interpolate_y: 4
+    camera_ip: "192.168.0.1"
+    port: 24691
+    high_speed_port: 24692
+    device_id: 0
+    program: 0
+    use_image_filter: false
+    interpolate_y: 4
+    camera_settings:
+      exposure_time_us: 640
+      dynamic_range: 4
+      light_control_mode: AUTO
+      light_control_upper: 90
+      light_control_lower: 10
+      detection_sensitivity: 3
