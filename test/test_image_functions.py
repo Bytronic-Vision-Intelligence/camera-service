@@ -208,3 +208,43 @@ def test_resolve_image_outputs_defaults_without_images_key():
     assert outputs[0]["id"] == "default"
     assert outputs[0]["rotate"] is None
     assert outputs[0]["crop"] is None
+
+
+def test_build_packet_list_keeps_small_images_as_one_packet():
+    from dependencies.image_functions import build_packet_list
+
+    img = np.zeros((32, 32, 3), dtype=np.uint8)
+    packets = build_packet_list(
+        "cam/image", img, image_id="default", date_time="2020-01-01 00:00:00"
+    )
+
+    assert len(packets) == 1
+    assert "packet_number" not in packets[0]["payload"]
+
+
+def test_build_packet_list_splits_when_over_size_cap():
+    import base64
+
+    from dependencies.image_functions import build_packet_list, decode_image_from_bytes
+
+    # High-entropy noise compresses poorly, so a low cap forces a split.
+    rng = np.random.default_rng(0)
+    img = rng.integers(0, 255, size=(240, 320, 3), dtype=np.uint8)
+    packets = build_packet_list(
+        "cam/image",
+        img,
+        image_id="default",
+        date_time="2020-01-01 00:00:00",
+        max_packet_bytes=8_000,
+    )
+
+    assert len(packets) > 1
+    assert all("packet_number" in p["payload"] for p in packets)
+    assert packets[0]["payload"]["packet_count"] == len(packets)
+
+    # Placement metadata should cover the full frame.
+    assert packets[0]["payload"]["y0"] == 0
+    assert packets[-1]["payload"]["y1"] == img.shape[0]
+    assert packets[0]["payload"]["full_height"] == img.shape[0]
+    part = decode_image_from_bytes(base64.b64decode(packets[0]["payload"]["image"]))
+    assert part.shape[1] == img.shape[1]

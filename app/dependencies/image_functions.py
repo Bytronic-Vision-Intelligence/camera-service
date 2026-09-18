@@ -1,6 +1,19 @@
-import numpy as np
-import cv2
+"""Encode/decode camera frames and build MQTT image packets."""
+
+from __future__ import annotations
+
+import base64
+import math
+import time
 from time import localtime, strftime
+
+import cv2
+import numpy as np
+
+from dependencies.image_transforms import apply_image_format
+
+# Soft cap on each published MQTT image field (base64 chars).
+DEFAULT_MAX_PACKET_BYTES = 512 * 1024
 
 
 def prepare_image_for_jpeg(image: np.ndarray) -> np.ndarray:
@@ -59,168 +72,6 @@ def decode_image_from_bytes(data: bytes) -> np.ndarray:
     return image
 
 
-def _rotation_code(degrees) -> int:
-    """Map degrees to a ``cv2.ROTATE_*`` code (90 / -90 / 180 / 270)."""
-    angle = int(degrees)
-    if angle == 180:
-        return cv2.ROTATE_180
-    if angle == 90:
-        return cv2.ROTATE_90_CLOCKWISE
-    if angle == 270 or angle == -90:
-        return cv2.ROTATE_90_COUNTERCLOCKWISE
-    raise ValueError(f"Unsupported rotate: {degrees!r} (use 90, -90, 180, or 270)")
-
-
-def _apply_crop(image: np.ndarray, crop) -> np.ndarray:
-    """Crop with fractional ``x`` / ``y`` ranges, e.g. ``[{x: [0.15, 0.85]}]``."""
-    h, w = image.shape[:2]
-    x0, x1, y0, y1 = 0, w, 0, h
-    for item in crop:
-        axis, (start, end) = next(iter(item.items()))
-        if axis == "x":
-            x0, x1 = int(start * w), int(end * w)
-        elif axis == "y":
-            y0, y1 = int(start * h), int(end * h)
-    return image[y0:y1, x0:x1]
-
-
-def _color_conversion_code(name: str) -> int:
-    attr = f"COLOR_{str(name).strip()}"
-    if hasattr(cv2, attr):
-        return getattr(cv2, attr)
-    raise ValueError(f"Unsupported channel conversion: {name!r}")
-
-
-def _colormap_code(name: str) -> int:
-    attr = str(name).strip()
-    if not attr.startswith("COLORMAP_"):
-        attr = f"COLORMAP_{attr}"
-    if hasattr(cv2, attr):
-        return getattr(cv2, attr)
-    raise ValueError(f"Unsupported colourmap: {name!r}")
-
-
-def _parse_norm_range(norm_range) -> tuple[float, float] | None:
-    """Validate optional ``norm_range: [min, max]`` for fixed colormap scaling."""
-    if norm_range is None:
-        return None
-    if not isinstance(norm_range, (list, tuple)) or len(norm_range) != 2:
-        raise ValueError(f"norm_range must be [min, max], got {norm_range!r}")
-    vmin, vmax = float(norm_range[0]), float(norm_range[1])
-    if not np.isfinite(vmin) or not np.isfinite(vmax) or vmax <= vmin:
-        raise ValueError(f"norm_range max must be > min, got {norm_range!r}")
-    return vmin, vmax
-
-
-def _to_grayscale_uint8(
-    image: np.ndarray,
-    norm_range: tuple[float, float] | list | None = None,
-) -> np.ndarray:
-    """Collapse to single-channel uint8.
-
-    When ``norm_range`` is set, scale that fixed DN window to 0–255 (values
-    outside are clipped). Otherwise use per-frame min/max normalisation.
-    """
-    img = image
-    if img.ndim == 3:
-        if img.shape[2] == 1:
-            img = img[:, :, 0]
-        else:
-            img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    if img.dtype != np.uint8:
-        parsed = _parse_norm_range(norm_range)
-        if parsed is not None:
-            vmin, vmax = parsed
-            scaled = (img.astype(np.float32) - vmin) * (255.0 / (vmax - vmin))
-            img = np.clip(scaled, 0, 255).astype(np.uint8)
-        else:
-            img = cv2.normalize(img, None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U)
-    return img
-
-
-def _bit_mask(bits: int) -> int:
-    if bits < 1 or bits > 16:
-        raise ValueError(f"uint16 bit depth must be 1-16 (got {bits})")
-    return (1 << bits) - 1
-
-
-def _to_uint16(image: np.ndarray, bits: int | None = None) -> np.ndarray:
-    """Return a 2D uint16 mono image, optionally masked to ``bits``."""
-    img = image
-    if img.ndim == 3:
-        if img.shape[2] == 1:
-            img = img[:, :, 0]
-        else:
-            img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-
-    max_value = _bit_mask(bits) if bits is not None else 65535
-
-    if img.dtype == np.uint16:
-        out = img
-    elif img.dtype == np.uint8:
-        out = img.astype(np.uint16)
-    elif img.dtype.kind == "f":
-        out = img.clip(0, max_value).round().astype(np.uint16)
-    else:
-        out = img.clip(0, max_value).astype(np.uint16)
-
-    if bits is not None:
-        out = np.bitwise_and(out, np.uint16(max_value))
-    return out
-
-
-def _apply_mono_format(image: np.ndarray, name: str) -> np.ndarray:
-    """Convert to MonoN / uint16 / uint8."""
-    lower = name.lower()
-
-    if lower == "uint8":
-        return _to_grayscale_uint8(image)
-    if lower == "uint16":
-        return _to_uint16(image)
-    if lower.startswith("mono"):
-        depth = int(name[4:])
-        return _to_uint16(image, depth)
-
-    raise ValueError(f"Unsupported mono image_format: {name!r}")
-
-
-def apply_image_format(image: np.ndarray, output_settings) -> np.ndarray:
-    """Apply rotate, crop, then ``image_format``. ``None`` format keeps raw pixels."""
-    if not isinstance(output_settings, dict):
-        raise ValueError("output_settings must be a mapping")
-
-    if output_settings.get("rotate") is not None:
-        image = cv2.rotate(image, _rotation_code(output_settings["rotate"]))
-
-    if output_settings.get("crop") is not None:
-        image = _apply_crop(image, output_settings["crop"])
-
-    image_format = output_settings.get("image_format")
-    if image_format is None:
-        return image
-
-    if isinstance(image_format, str):
-        return _apply_mono_format(image, image_format.strip())
-
-    if not isinstance(image_format, dict):
-        raise ValueError("image_format must be a string, mapping, or null")
-
-    if "channel" in image_format:
-        if image.ndim < 3 or image.shape[2] < 3:
-            raise ValueError(
-                f"channel {image_format['channel']!r} requires a 3-channel image"
-            )
-        return cv2.cvtColor(image, _color_conversion_code(image_format["channel"]))
-
-    if "colourmap" in image_format:
-        return cv2.applyColorMap(
-            _to_grayscale_uint8(image, norm_range=image_format.get("norm_range")),
-            _colormap_code(image_format["colourmap"]),
-        )
-
-    raise ValueError(f"Unsupported image_format: {image_format!r}")
-
-
 def build_image_topic(base_topic: str, topic_end: str | None) -> str:
     """Append ``topic_end`` to the mqtt ``image_topic`` base when set."""
     base = str(base_topic).rstrip("/")
@@ -230,6 +81,116 @@ def build_image_topic(base_topic: str, topic_end: str | None) -> str:
     if not suffix:
         return base
     return f"{base}/{suffix}"
+
+
+def _b64_encoding(image: np.ndarray) -> tuple[str, str]:
+    """Return ``(base64_text, encoding)`` for ``image``."""
+    return (
+        base64.b64encode(encode_image_to_bytes(image)).decode("ascii"),
+        image_encoding(image),
+    )
+
+
+def divide_image_packets(
+    image: np.ndarray,
+    *,
+    max_packet_bytes: int = DEFAULT_MAX_PACKET_BYTES,
+) -> list[dict]:
+    """Split ``image`` into horizontal strips when the encoded size is too large."""
+    height, width = image.shape[:2]
+    encoded, encoding = _b64_encoding(image)
+    if len(encoded) <= max_packet_bytes:
+        return [
+            {
+                "packet_number": 0,
+                "packet_count": 1,
+                "y0": 0,
+                "y1": height,
+                "x0": 0,
+                "x1": width,
+                "full_height": height,
+                "full_width": width,
+                "image": encoded,
+                "encoding": encoding,
+            }
+        ]
+
+    n = max(2, math.ceil(len(encoded) / max_packet_bytes))
+    while n <= height:
+        parts = []
+        for i in range(n):
+            y0, y1 = i * height // n, (i + 1) * height // n
+            part_b64, part_encoding = _b64_encoding(image[y0:y1])
+            if len(part_b64) > max_packet_bytes:
+                parts = None
+                break
+            parts.append(
+                {
+                    "packet_number": i,
+                    "packet_count": n,
+                    "y0": y0,
+                    "y1": y1,
+                    "x0": 0,
+                    "x1": width,
+                    "full_height": height,
+                    "full_width": width,
+                    "image": part_b64,
+                    "encoding": part_encoding,
+                }
+            )
+        if parts is not None:
+            return parts
+        n += 1
+
+    raise ValueError(f"Could not fit image under {max_packet_bytes} bytes per packet")
+
+
+def build_packet_list(
+    topic: str,
+    image: np.ndarray,
+    *,
+    image_id: str,
+    date_time: str,
+    max_packet_bytes: int = DEFAULT_MAX_PACKET_BYTES,
+) -> list[dict]:
+    """Build ``[{topic, payload}, ...]`` for ``client.publish_many``."""
+    parts = divide_image_packets(image, max_packet_bytes=max_packet_bytes)
+    if len(parts) == 1:
+        part = parts[0]
+        return [
+            {
+                "topic": topic,
+                "payload": {
+                    "image": part["image"],
+                    "date_time": date_time,
+                    "image_id": image_id,
+                    "encoding": part["encoding"],
+                },
+            }
+        ]
+
+    group_id = f"{date_time}|{image_id}|{time.time_ns()}"
+    return [
+        {
+            "topic": topic,
+            "payload": {
+                "group_id": group_id,
+                "packet_number": part["packet_number"],
+                "packet_count": part["packet_count"],
+                "image": part["image"],
+                "date_time": date_time,
+                "image_id": image_id,
+                "encoding": part["encoding"],
+                "y0": part["y0"],
+                "y1": part["y1"],
+                "x0": part["x0"],
+                "x1": part["x1"],
+                "full_height": part["full_height"],
+                "full_width": part["full_width"],
+            },
+        }
+        for part in parts
+    ]
 
 
 def parse_image_outputs(images_config) -> list[dict]:

@@ -1,11 +1,9 @@
-import base64
 import json
 import signal
 import time
 from json import JSONDecodeError
 from logging import critical, debug, error, info
 from queue import Empty, Queue
-from sys import getsizeof
 from threading import Event, Thread
 
 import numpy as np
@@ -18,9 +16,8 @@ from dependencies.archive_functions import archive_image
 from dependencies.image_functions import (
     apply_image_format,
     build_image_topic,
+    build_packet_list,
     encode_date_time_to_bytes,
-    encode_image_to_bytes,
-    image_encoding,
     resolve_image_outputs,
 )
 from dependencies.mqtt_functions import start_subscribe_thread
@@ -192,7 +189,7 @@ def publish_outputs(
     archive_config: dict,
 ) -> None:
     """Format, optionally archive, encode, and publish every configured output."""
-    date_time = encode_date_time_to_bytes()
+    date_time = encode_date_time_to_bytes().decode("utf-8")
     timestamp = time.strftime("%Y%m%d_%H%M%S")
     archived = require(archive_config, "is_archived")
     is_archived = str(archived).strip().lower() in {"1", "true", "yes", "on"}
@@ -225,30 +222,21 @@ def publish_outputs(
                 require(camera_config, "camera_id"),
             )
 
-        image_bytes = encode_image_to_bytes(variant)
-        packet = {
-            "image": base64.b64encode(image_bytes).decode("ascii"),
-            "date_time": date_time.decode("utf-8"),
-            "image_id": output["id"],
-            "encoding": image_encoding(variant),
-        }
-
-        info(
-            "Publishing image %s to %s (size %s)",
-            output["id"],
+        packet_list = build_packet_list(
             topic,
-            getsizeof(image_bytes),
+            variant,
+            image_id=output["id"],
+            date_time=date_time,
         )
-
+        info(
+            "Publishing %s image packet(s) to %s",
+            len(packet_list),
+            topic,
+        )
         try:
-            client.publish(topic, packet)
+            client.publish_many(packet_list)
         except Exception as exc:
-            error(
-                "Error publishing image %s to %s: %s",
-                output["id"],
-                topic,
-                exc,
-            )
+            error("Error publishing image %s to %s: %s", output["id"], topic, exc)
 
 
 def _capture_and_publish(
