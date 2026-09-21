@@ -39,10 +39,13 @@ class DummyCamera(Camera):
             raise RuntimeError(f"No dummy frames found in {directory_path}")
 
     def capture_image(self, timeout_ms=0):
-        """Return a random frame from the current frame list."""
+        """Return a random frame from the current frame list (keeps 16-bit depth)."""
         if not self.frame_list:
             raise RuntimeError("No dummy frames found in dummy_location")
-        return cv2.imread(self.frame_list[randint(0, len(self.frame_list) - 1)])
+        return cv2.imread(
+            self.frame_list[randint(0, len(self.frame_list) - 1)],
+            cv2.IMREAD_UNCHANGED,
+        )
 
     def wait_for_frame(
         self,
