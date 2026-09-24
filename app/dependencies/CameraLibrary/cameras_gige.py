@@ -350,14 +350,41 @@ class GigeCamera(Camera):
                 time.sleep(0.1)
 
             nm = self.cam.remote_device.node_map
-            # Default packet size on Cognex CIC is often 576 — too small for a full frame.
-            for packet_size in (1500, 3000, 8000, 9000):
+            # Default packet size on Cognex CIC is often 576 — too small for a
+            # full frame. Tried LARGEST FIRST and stopping at the first that
+            # takes, so the link gets the biggest packet it supports.
+            #
+            # This list used to run smallest-first with the same `break`, which
+            # meant it stopped at 1500 every time: 1500 practically always
+            # succeeds, so 3000/8000/9000 were never reached and the jumbo
+            # frames this loop exists to negotiate were never used. A 2056x2464
+            # RGB frame is ~15MB, which is ~10,600 packets at 1500 against
+            # ~1,700 at 9000 -- measured at 5.3s per frame on the line, slow
+            # enough that consumers waiting on the image timed out.
+            # Configurable, because the camera accepting a packet size does NOT
+            # mean the link carries it: the node-map write succeeds regardless,
+            # and if the host NIC or a switch on the path is still at a 1500
+            # MTU the oversized packets are silently dropped and the capture
+            # fails outright -- worse than slow. Raising this is a decision to
+            # be made with the NIC, not by this code guessing.
+            #
+            # `camera_settings.packet_size` pins one value. Absent, the sizes
+            # below are tried largest first and the first that takes is kept.
+            configured = (self.camera_settings or {}).get("packet_size")
+            candidates = ((int(configured),) if configured
+                          else (9000, 8000, 3000, 1500))
+            for packet_size in candidates:
                 try:
                     nm.GevSCPSPacketSize.value = packet_size
                     logging.info("GevSCPSPacketSize=%s", nm.GevSCPSPacketSize.value)
                     break
                 except Exception:
                     continue
+            else:
+                logging.warning(
+                    "No packet size from %s was accepted; the camera keeps its "
+                    "default, which on some models is 576 and too small for a "
+                    "full frame.", candidates)
 
             self._apply_camera_settings(self.cam)
             self._apply_lights_settings(self.cam)
