@@ -13,8 +13,8 @@ RAW_PNG_MM_SCALE = 100.0  # 0.01 mm resolution
 BIT_SCALE_15 = 32768.0
 
 
-def _archive_save_dir(directory, archive_params: dict, camera_id=None) -> str | None:
-    """Build dated/cam subfolder under archive_directory. Returns None on bad input."""
+def _archive_save_dir(directory, archive_params: dict, camera_id=None, sku=None) -> str | None:
+    """Build dated[/sku]/cam subfolder under archive_directory. Returns None on bad input."""
     if directory == "" or directory is None:
         logging.error("no directory specified")
         return None
@@ -37,6 +37,9 @@ def _archive_save_dir(directory, archive_params: dict, camera_id=None) -> str | 
     path_parts = [base_directory]
     if subfolder:
         path_parts.append(subfolder)
+    sku_folder = str(sku).strip() if sku is not None else ""
+    if sku_folder:
+        path_parts.append(sku_folder)
     if camera_id is not None:
         path_parts.append(f"cam_{camera_id}")
     save_directory = os.path.join(*path_parts)
@@ -83,7 +86,7 @@ def decode_raw_height_png(image: np.ndarray) -> np.ndarray:
     return mm
 
 
-def save_image_to_file(image: np.ndarray, directory: str, filename: str, archive_params: dict, camera_id=None):
+def save_image_to_file(image: np.ndarray, directory: str, filename: str, archive_params: dict, camera_id=None, sku=None):
     ''' Saves an image to a specified file directory
 
     Args:
@@ -91,7 +94,8 @@ def save_image_to_file(image: np.ndarray, directory: str, filename: str, archive
         directory: a directory location
         filename: the name of the image
         archive_params: frequency of saving, when to delete, etc.
-        camera_id: optional id used as save_dir/date/cam{id}
+        camera_id: optional id used as save_dir/date[/sku]/cam{id}
+        sku: optional selected SKU folder between date and camera
     '''
     if image is None:
         logging.error("Image cannot be none")
@@ -101,7 +105,7 @@ def save_image_to_file(image: np.ndarray, directory: str, filename: str, archive
         return
 
     try:
-        save_directory = _archive_save_dir(directory, archive_params, camera_id)
+        save_directory = _archive_save_dir(directory, archive_params, camera_id, sku=sku)
         if save_directory is None:
             return
 
@@ -121,7 +125,7 @@ def save_image_to_file(image: np.ndarray, directory: str, filename: str, archive
         logging.error(f"failed to write image to archive error: {e}")
 
 
-def archive_image(image: np.ndarray, directory: str, filename: str, archive_params: dict, camera_id=None):
+def archive_image(image: np.ndarray, directory: str, filename: str, archive_params: dict, camera_id=None, sku=None):
     '''starts a worker thread that will run the save_image_to_file function on a given image
 
     Args:
@@ -138,6 +142,7 @@ def archive_image(image: np.ndarray, directory: str, filename: str, archive_para
             filename,
             archive_params,
             camera_id,
+            sku,
         ),
         daemon=True
     ).start()

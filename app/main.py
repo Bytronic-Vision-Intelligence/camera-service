@@ -3,7 +3,7 @@ import json
 import signal
 import time
 from json import JSONDecodeError
-from logging import critical, debug, error, info
+from logging import critical, debug, error, info, warning
 from queue import Empty, Queue
 from sys import getsizeof
 from threading import Event, Thread
@@ -158,6 +158,33 @@ def trigger_queue_from_topics(topics: list) -> Queue | None:
     return None
 
 
+def apply_sku_updates(topics: list, archive_config: dict) -> None:
+    """Drain non-trigger sku_update messages into ``archive_config['selected_sku']``."""
+    for topic in topics:
+        if topic.get("name") != "sku_update" or "queue" not in topic:
+            continue
+        while True:
+            try:
+                payload = topic["queue"].get_nowait()
+            except Empty:
+                break
+            data = _parse_mqtt_dict(payload)
+            if not isinstance(data, dict):
+                warning("Discarding non-object sku_update payload")
+                continue
+            sku = data.get("sku")
+            if sku is None:
+                sku = data.get("sku_id")
+            if sku is None:
+                warning("sku_update missing sku/sku_id; ignoring")
+                continue
+            sku_text = str(sku).strip()
+            if not sku_text:
+                continue
+            archive_config["selected_sku"] = sku_text
+            info("Archive selected_sku updated to %s", sku_text)
+
+
 def continuous_interval_s(trigger_config: dict) -> float:
     """Seconds between software-continuous captures."""
     try:
@@ -223,6 +250,7 @@ def publish_outputs(
                 archive_filename,
                 require(archive_config, "archive_parameters"),
                 require(camera_config, "camera_id"),
+                sku=archive_config.get("selected_sku"),
             )
 
         image_bytes = encode_image_to_bytes(variant)
@@ -347,6 +375,7 @@ def run_software_single(
     camera_id = str(require(camera_config, "camera_id"))
     time.sleep(0.1)
     while not stop_event.is_set():
+        apply_sku_updates(topics, archive_config)
         try:
             message = event_queue.get(timeout=1.0)
         except Empty:
@@ -446,6 +475,7 @@ def run_software_continuous(
 
     time.sleep(0.1)
     while not stop_event.is_set():
+        apply_sku_updates(topics, archive_config)
         try:
             message = event_queue.get(timeout=0.1 if streaming else 1.0)
         except Empty:
@@ -539,6 +569,12 @@ def main(argv=None) -> int:
     camera_config = require(service, "camera")
     trigger_config = require(service, "trigger")
     archive_config = require(service, "archiving")
+    # Live SKU folder for archives; updated via mqtt topic name sku_update.
+    selected = archive_config.get("selected_sku")
+    if selected is None:
+        selected = service.get("selected_sku")
+    if selected is not None and str(selected).strip():
+        archive_config["selected_sku"] = str(selected).strip()
     camera_settings = service.get("camera_settings") or {}
     lights_config = service.get("lights") or {}
     image_outputs = resolve_image_outputs(service)
