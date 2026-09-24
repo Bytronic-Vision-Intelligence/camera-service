@@ -261,6 +261,49 @@ def test_main_software_continuous_on_off(monkeypatch):
     assert fake_camera.disconnected is True
 
 
+def test_main_software_continuous_trigger_on_startup(monkeypatch):
+    config = make_config(
+        trigger={
+            "trigger_type": "software",
+            "capture_type": "continuous",
+            "trigger_delay": 0.01,
+            "trigger_on_startup": True,
+        }
+    )
+    monkeypatch.setattr(main.loadConfig, "get_config", lambda supplied=None: config)
+    monkeypatch.setattr(main, "MQTTClient", FakeMQTTClient)
+    monkeypatch.setattr(main, "MQTTConfig", FakeMQTTConfig)
+
+    fake_camera = FakeCamera()
+    monkeypatch.setattr(main, "set_camera_class", lambda *a, **k: fake_camera)
+
+    def fake_start(ip, port, topic, queue, stop_event):
+        # No MQTT arm — streaming must start from trigger_on_startup alone.
+        return FakeThread()
+
+    monkeypatch.setattr(main, "start_subscribe_thread", fake_start)
+
+    original = main.publish_outputs
+
+    def wrap(*args, **kwargs):
+        original(*args, **kwargs)
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(main, "publish_outputs", wrap)
+    monkeypatch.setattr(main.time, "sleep", lambda *_: None)
+
+    main.main(["--config", "stub.yaml"])
+    assert fake_camera.captured >= 1
+    assert fake_camera.disconnected is True
+
+
+def test_trigger_on_startup_enabled_truthy_values():
+    assert main.trigger_on_startup_enabled({"trigger_on_startup": True}) is True
+    assert main.trigger_on_startup_enabled({"trigger_on_startup": "true"}) is True
+    assert main.trigger_on_startup_enabled({"trigger_on_startup": False}) is False
+    assert main.trigger_on_startup_enabled({}) is False
+
+
 def test_main_rejects_unknown_trigger_type(monkeypatch):
     config = make_config(trigger={"trigger_type": "internal", "capture_type": "single"})
     monkeypatch.setattr(main.loadConfig, "get_config", lambda supplied=None: config)

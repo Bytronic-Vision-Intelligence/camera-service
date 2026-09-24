@@ -51,6 +51,7 @@ service:
     capture_type: single
     # trigger_delay: 1.0          # software/continuous interval (seconds)
     # continuous_fps: 2           # used if trigger_delay is 0
+    # trigger_on_startup: true    # software/continuous: start streaming without MQTT on
     # trigger_source: Line1       # hardware/single
     # trigger_activation: RisingEdge
 
