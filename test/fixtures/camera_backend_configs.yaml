@@ -57,9 +57,9 @@ camera_types:
     serial_number: "89901703"
     capture_timeout: 10
     camera_settings:
+      camera_model: a70
       buffer_size: 0
-      pixel_format: Mono14
-      cmos_bit_depth: bit14bit
+      pixel_format: Mono16
       temperature_linear_mode: true
 
   pylon:
