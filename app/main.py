@@ -582,6 +582,14 @@ def continuous_stream_command(message) -> bool | None:
     return None
 
 
+def trigger_on_startup_enabled(trigger_config: dict) -> bool:
+    """Return True when ``service.trigger.trigger_on_startup`` is truthy."""
+    value = trigger_config.get("trigger_on_startup", False)
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    return bool(value)
+
+
 def run_software_continuous(
     mqtt_config,
     topics,
@@ -599,6 +607,9 @@ def run_software_continuous(
     Start with ``{"active": true}`` / ``on``; stop with ``{"active": false}`` /
     ``off``. While on, frames are captured at ``trigger_delay`` /
     ``continuous_fps`` — the service does not fire repeated trigger messages.
+
+    When ``trigger_on_startup`` is true, streaming begins immediately without
+    waiting for an MQTT arm command (MQTT off/on still stops and restarts it).
     """
     threads = start_subscribers(mqtt_config, topics, stop_event)
     event_queue = trigger_queue_from_topics(topics)
@@ -606,11 +617,18 @@ def run_software_continuous(
         raise SystemExit("software/continuous requires a subscribed trigger topic")
 
     interval = continuous_interval_s(trigger_config)
-    streaming = False
-    info(
-        "software/continuous idle; MQTT on/off arms capture every %.3fs",
-        interval,
-    )
+    streaming = trigger_on_startup_enabled(trigger_config)
+    if streaming:
+        info(
+            "software/continuous stream ON (trigger_on_startup); "
+            "capturing every %.3fs",
+            interval,
+        )
+    else:
+        info(
+            "software/continuous idle; MQTT on/off arms capture every %.3fs",
+            interval,
+        )
 
     time.sleep(0.1)
     while not stop_event.is_set():
