@@ -2,6 +2,7 @@ import os
 import logging
 import threading
 import datetime
+import uuid
 
 import numpy as np
 from cv2 import imwrite
@@ -12,9 +13,115 @@ from cv2 import imwrite
 RAW_PNG_MM_SCALE = 100.0  # 0.01 mm resolution
 BIT_SCALE_15 = 32768.0
 
+# Truncated uuid4. 4 hex chars is enough to split two saves that share
+# camera, image type, sku, and the same second. The timestamp is already
+# in the filename.
+ARCHIVE_ID_HEX_LEN = 8
 
-def _archive_save_dir(directory, archive_params: dict, camera_id=None, sku=None) -> str | None:
-    """Build dated[/sku]/cam subfolder under archive_directory. Returns None on bad input."""
+
+def _filename_token(value, default: str) -> str:
+    """Keep a filename field free of path separators and the ``__`` delimiter."""
+    text = str(value).strip() if value is not None else ""
+    if not text:
+        return default
+    cleaned = []
+    for ch in text:
+        if ch.isalnum() or ch in "-_":
+            cleaned.append(ch)
+        else:
+            cleaned.append("_")
+    token = "".join(cleaned).strip("_")
+    while "__" in token:
+        token = token.replace("__", "_")
+    return token or default
+
+
+# Locked filename order when ``default_order`` is true. A missing value is left out.
+FILENAME_CATEGORIES = (
+    "uuid",
+    "camera_id",
+    "camera_type",
+    "image_type",
+    "sku_id",
+    "datetime",
+    "verdict",
+)
+
+
+def filename_categories(archive_params: dict | None) -> list[str]:
+    """``FILENAME_CATEGORIES`` when ``default_order`` is on, otherwise the config list."""
+    params = archive_params or {}
+    default_order = params.get("default_order", True)
+    if isinstance(default_order, str):
+        default_order = default_order.strip().lower() not in {"0", "false", "no", "off"}
+    if default_order:
+        return list(FILENAME_CATEGORIES)
+
+    names = []
+    raw = params.get("filename_categories")
+    items = raw.split(",") if isinstance(raw, str) else (raw or [])
+    for item in items:
+        if isinstance(item, dict):
+            continue
+        name = str(item).strip().lower()
+        if not name:
+            continue
+        if name not in FILENAME_CATEGORIES:
+            logging.warning("Unknown archive filename category %r", name)
+            continue
+        names.append(name)
+    return names or list(FILENAME_CATEGORIES)
+
+
+def build_archive_filename(
+    categories: list,
+    values: dict | None = None,
+    ext: str = "png",
+    when: datetime.datetime | None = None,
+    archive_id: str | None = None,
+) -> str:
+    """Join ``categories`` with ``__``, skipping any field that has no value.
+
+    ``datetime`` is ``YYYYMMDD_hhmmss``. ``uuid`` is a 4-hex-char id when
+    ``values`` does not already supply one.
+    """
+    when = when or datetime.datetime.now()
+    values = values or {}
+    parts = []
+    for category in categories:
+        name = str(category).strip().lower()
+        if name not in FILENAME_CATEGORIES:
+            continue
+        token = _category_token(name, values, when, archive_id)
+        if token:
+            parts.append(token)
+    if not parts:
+        parts.append(archive_id or uuid.uuid4().hex[:ARCHIVE_ID_HEX_LEN])
+    suffix = _filename_token(ext, "png").lstrip(".")
+    return f"{'__'.join(parts)}.{suffix}"
+
+
+def _category_token(name: str, values: dict, when: datetime.datetime, archive_id: str | None) -> str:
+    if name == "uuid":
+        short_id = archive_id or values.get("uuid") or uuid.uuid4().hex[:ARCHIVE_ID_HEX_LEN]
+        return _filename_token(short_id, "0")
+    if name == "datetime":
+        stamp = values.get("datetime", when)
+        if isinstance(stamp, datetime.datetime):
+            return stamp.strftime("%Y%m%d_%H%M%S")
+        text = str(stamp).strip() if stamp is not None else ""
+        return text or when.strftime("%Y%m%d_%H%M%S")
+    raw = values.get(name)
+    if raw is None or not str(raw).strip():
+        return ""
+    return _filename_token(raw, "")
+
+
+def _archive_save_dir(directory, archive_params: dict, camera_id=None) -> str | None:
+    """Build ``archive_directory/YYYYMMDD[_hh]/camera_id``. Returns None on bad input.
+
+    ``archive_freq`` ``daily`` uses ``YYYYMMDD``. ``hourly`` uses ``YYYYMMDD_hh``.
+    """
     if directory == "" or directory is None:
         logging.error("no directory specified")
         return None
@@ -37,11 +144,8 @@ def _archive_save_dir(directory, archive_params: dict, camera_id=None, sku=None)
     path_parts = [base_directory]
     if subfolder:
         path_parts.append(subfolder)
-    sku_folder = str(sku).strip() if sku is not None else ""
-    if sku_folder:
-        path_parts.append(sku_folder)
     if camera_id is not None:
-        path_parts.append(f"cam_{camera_id}")
+        path_parts.append(_filename_token(camera_id, "0"))
     save_directory = os.path.join(*path_parts)
     os.makedirs(save_directory, exist_ok=True)
     return save_directory
@@ -86,16 +190,15 @@ def decode_raw_height_png(image: np.ndarray) -> np.ndarray:
     return mm
 
 
-def save_image_to_file(image: np.ndarray, directory: str, filename: str, archive_params: dict, camera_id=None, sku=None):
+def save_image_to_file(image: np.ndarray, directory: str, filename: str, archive_params: dict, camera_id=None):
     ''' Saves an image to a specified file directory
 
     Args:
         image: a numpy array of pixels
         directory: a directory location
-        filename: the name of the image
+        filename: image name including extension
         archive_params: frequency of saving, when to delete, etc.
-        camera_id: optional id used as save_dir/date[/sku]/cam{id}
-        sku: optional selected SKU folder between date and camera
+        camera_id: folder under the date directory
     '''
     if image is None:
         logging.error("Image cannot be none")
@@ -105,11 +208,11 @@ def save_image_to_file(image: np.ndarray, directory: str, filename: str, archive
         return
 
     try:
-        save_directory = _archive_save_dir(directory, archive_params, camera_id, sku=sku)
+        save_directory = _archive_save_dir(directory, archive_params, camera_id)
         if save_directory is None:
             return
 
-        image_path = os.path.join(save_directory, f"{filename}.png")
+        image_path = os.path.join(save_directory, filename)
         to_save = prepare_raw_png(image)
         success = imwrite(image_path, to_save)
         if success:
@@ -125,13 +228,13 @@ def save_image_to_file(image: np.ndarray, directory: str, filename: str, archive
         logging.error(f"failed to write image to archive error: {e}")
 
 
-def archive_image(image: np.ndarray, directory: str, filename: str, archive_params: dict, camera_id=None, sku=None):
+def archive_image(image: np.ndarray, directory: str, filename: str, archive_params: dict, camera_id=None):
     '''starts a worker thread that will run the save_image_to_file function on a given image
 
     Args:
         image: a numpy array of pixels
         directory: a directory location
-        filename: the name of the image
+        filename: image name including extension
         '''
 
     threading.Thread(
@@ -142,7 +245,6 @@ def archive_image(image: np.ndarray, directory: str, filename: str, archive_para
             filename,
             archive_params,
             camera_id,
-            sku,
         ),
         daemon=True
     ).start()
