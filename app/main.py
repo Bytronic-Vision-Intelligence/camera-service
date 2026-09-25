@@ -2,7 +2,7 @@ import json
 import signal
 import time
 from json import JSONDecodeError
-from logging import critical, debug, error, info
+from logging import critical, debug, error, info, warning
 from queue import Empty, Queue
 from threading import Event, Thread
 
@@ -12,7 +12,11 @@ from mqtt_client import MQTTClient, MQTTConfig
 from dependencies import loadConfig, logging_setup
 from dependencies.CameraLibrary.cameras import Camera
 from dependencies.CameraLibrary.hardware_trigger import CameraLossError
-from dependencies.archive_functions import archive_image
+from dependencies.archive_functions import (
+    archive_image,
+    build_archive_filename,
+    filename_categories,
+)
 from dependencies.image_functions import (
     apply_image_format,
     build_image_topic,
@@ -60,6 +64,14 @@ def topic_named(topics: list, name: str, values: dict | None = None) -> str:
         f"No topic named '{name}'. camera-service looks its "
         f"topics up by name; add `- name: {name}` under mqtt.topics."
     )
+
+
+def topic_by_name(topics: list | None, name: str) -> str | None:
+    """Return a named topic string, or None when it is not configured."""
+    for topic in topics or []:
+        if topic.get("name") == name:
+            return topic.get("topic")
+    return None
 
 
 def apply_topic_placeholders(topics: list, values: dict) -> None:
@@ -155,6 +167,33 @@ def trigger_queue_from_topics(topics: list) -> Queue | None:
     return None
 
 
+def apply_sku_updates(topics: list, archive_config: dict) -> None:
+    """Drain non-trigger sku_update messages into ``archive_config['selected_sku']``."""
+    for topic in topics:
+        if topic.get("name") != "sku_update" or "queue" not in topic:
+            continue
+        while True:
+            try:
+                payload = topic["queue"].get_nowait()
+            except Empty:
+                break
+            data = _parse_mqtt_dict(payload)
+            if not isinstance(data, dict):
+                warning("Discarding non-object sku_update payload")
+                continue
+            sku = data.get("sku")
+            if sku is None:
+                sku = data.get("sku_id")
+            if sku is None:
+                warning("sku_update missing sku/sku_id; ignoring")
+                continue
+            sku_text = str(sku).strip()
+            if not sku_text:
+                continue
+            archive_config["selected_sku"] = sku_text
+            info("Archive selected_sku updated to %s", sku_text)
+
+
 def continuous_interval_s(trigger_config: dict) -> float:
     """Seconds between software-continuous captures."""
     try:
@@ -180,6 +219,66 @@ def continuous_interval_s(trigger_config: dict) -> float:
     return 1.0 / max(fps, 0.1)
 
 
+def verdict_from_payload(message) -> str | None:
+    """Read pass/fail from an inspection or analysis result message."""
+    data = _parse_mqtt_dict(message)
+    if not data:
+        return None
+    status = data.get("status")
+    if isinstance(status, str) and status.strip():
+        return status.strip().lower()
+    verdict = data.get("verdict")
+    if isinstance(verdict, str) and verdict.strip():
+        return verdict.strip().lower()
+    if isinstance(verdict, dict):
+        inner = verdict.get("verdict")
+        if isinstance(inner, str) and inner.strip():
+            return inner.strip().lower()
+    return None
+
+
+def _drain_queue(queue: Queue) -> None:
+    while True:
+        try:
+            queue.get_nowait()
+        except Empty:
+            return
+
+
+def verdict_timeout_s(archive_config: dict) -> float:
+    """Seconds to wait for a result before archiving without a verdict."""
+    params = archive_config.get("archive_parameters") or {}
+    try:
+        timeout = float(params.get("verdict_timeout_s", 30) or 30)
+    except (TypeError, ValueError):
+        timeout = 30.0
+    return max(timeout, 0.0)
+
+
+def wait_for_verdict(
+    queue: Queue,
+    timeout_s: float,
+    stop_event: Event | None = None,
+) -> str | None:
+    """Return pass/fail, ``""`` if the message had none, or None on timeout."""
+    deadline = time.monotonic() + timeout_s
+    while True:
+        if stop_event is not None and stop_event.is_set():
+            return None
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return None
+        try:
+            message = queue.get(timeout=min(remaining, 0.25))
+        except Empty:
+            continue
+        verdict = verdict_from_payload(message)
+        if verdict:
+            return verdict
+        warning("Result payload had no pass/fail verdict; archiving without one")
+        return ""
+
+
 def publish_outputs(
     client: MQTTClient,
     image,
@@ -187,13 +286,16 @@ def publish_outputs(
     base_image_topic: str,
     camera_config: dict,
     archive_config: dict,
+    topics: list | None = None,
+    stop_event: Event | None = None,
 ) -> None:
-    """Format, optionally archive, encode, and publish every configured output."""
+    """Format, publish, then archive. Archive waits for a result topic when set."""
     date_time = encode_date_time_to_bytes().decode("utf-8")
     timestamp = time.strftime("%Y%m%d_%H%M%S")
     archived = require(archive_config, "is_archived")
     is_archived = str(archived).strip().lower() in {"1", "true", "yes", "on"}
 
+    prepared = []
     for output in image_outputs:
         try:
             variant = apply_image_format(image, output)
@@ -205,23 +307,48 @@ def publish_outputs(
                 exc_info=True,
             )
             continue
+        prepared.append((output, variant))
 
+    to_archive = [
+        (output, variant)
+        for output, variant in prepared
+        if is_archived and output["archive"]
+    ]
+    categories = filename_categories(archive_config.get("archive_parameters"))
+    wants_verdict = "verdict" in categories
+    result_topic = topic_by_name(topics, "result") if wants_verdict else None
+    result_queue = None
+    if to_archive and wants_verdict and result_topic is None:
+        warning("filename_categories includes verdict but no result topic is configured")
+    if to_archive and result_topic is not None:
+        for topic in topics or []:
+            if topic.get("name") == "result":
+                result_queue = topic.get("queue")
+                break
+        if result_queue is None:
+            warning(
+                "result topic %s is not subscribed; archiving without a verdict",
+                result_topic,
+            )
+        else:
+            # Drop a verdict from the previous capture before this image is published.
+            _drain_queue(result_queue)
+
+    sku_id = None
+    if "sku_id" in categories:
+        selected = archive_config.get("selected_sku")
+        if selected is not None and str(selected).strip():
+            sku_id = str(selected).strip()
+        elif to_archive and topic_by_name(topics, "sku_update") is None:
+            warning(
+                "filename_categories includes sku_id but no sku_update topic "
+                "or selected_sku is configured"
+            )
+        elif to_archive:
+            warning("No sku selected yet; archiving without a sku")
+
+    for output, variant in prepared:
         topic = build_image_topic(base_image_topic, output["topic_end"])
-
-        if is_archived and output["archive"]:
-            archive_filename = (
-                f"cam_{require(camera_config, 'camera_id') or '0'}_"
-                f"{require(camera_config, 'camera_type')}_"
-                f"{output['id']}_{timestamp}"
-            )
-            archive_image(
-                variant,
-                require(archive_config, "archive_directory"),
-                archive_filename,
-                require(archive_config, "archive_parameters"),
-                require(camera_config, "camera_id"),
-            )
-
         packet_list = build_packet_list(
             topic,
             variant,
@@ -238,6 +365,40 @@ def publish_outputs(
         except Exception as exc:
             error("Error publishing image %s to %s: %s", output["id"], topic, exc)
 
+    verdict = None
+    if to_archive and result_queue is not None:
+        timeout_s = verdict_timeout_s(archive_config)
+        info("Waiting up to %.1fs for a verdict on %s", timeout_s, result_topic)
+        verdict = wait_for_verdict(result_queue, timeout_s, stop_event)
+        if verdict == "":
+            verdict = None
+        elif verdict is None and (stop_event is None or not stop_event.is_set()):
+            warning(
+                "No verdict on %s within %.1fs; archiving without a verdict",
+                result_topic,
+                timeout_s,
+            )
+
+    for output, variant in to_archive:
+        archive_filename = build_archive_filename(
+            categories,
+            {
+                "camera_id": require(camera_config, "camera_id") or "0",
+                "camera_type": require(camera_config, "camera_type"),
+                "image_type": output["id"],
+                "sku_id": sku_id,
+                "datetime": timestamp,
+                "verdict": verdict,
+            },
+        )
+        archive_image(
+            variant,
+            require(archive_config, "archive_directory"),
+            archive_filename,
+            require(archive_config, "archive_parameters"),
+            require(camera_config, "camera_id"),
+        )
+
 
 def _capture_and_publish(
     client,
@@ -247,6 +408,8 @@ def _capture_and_publish(
     base_image_topic,
     archive_config,
     image=None,
+    topics: list | None = None,
+    stop_event: Event | None = None,
 ) -> None:
     start_time = time.time()
     info("Capturing image...")
@@ -268,6 +431,8 @@ def _capture_and_publish(
         base_image_topic,
         camera_config,
         archive_config,
+        topics,
+        stop_event,
     )
     info(
         "Image published in %.3fs.",
@@ -335,6 +500,7 @@ def run_software_single(
     camera_id = str(require(camera_config, "camera_id"))
     time.sleep(0.1)
     while not stop_event.is_set():
+        apply_sku_updates(topics, archive_config)
         try:
             message = event_queue.get(timeout=1.0)
         except Empty:
@@ -347,6 +513,7 @@ def run_software_single(
         _capture_and_publish(
             client, camera, camera_config, image_outputs,
             base_image_topic, archive_config,
+            topics=topics, stop_event=stop_event,
         )
     return threads
 
@@ -402,6 +569,14 @@ def continuous_stream_command(message) -> bool | None:
     return None
 
 
+def trigger_on_startup_enabled(trigger_config: dict) -> bool:
+    """Return True when ``service.trigger.trigger_on_startup`` is truthy."""
+    value = trigger_config.get("trigger_on_startup", False)
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    return bool(value)
+
+
 def run_software_continuous(
     mqtt_config,
     topics,
@@ -419,6 +594,9 @@ def run_software_continuous(
     Start with ``{"active": true}`` / ``on``; stop with ``{"active": false}`` /
     ``off``. While on, frames are captured at ``trigger_delay`` /
     ``continuous_fps`` — the service does not fire repeated trigger messages.
+
+    When ``trigger_on_startup`` is true, streaming begins immediately without
+    waiting for an MQTT arm command (MQTT off/on still stops and restarts it).
     """
     threads = start_subscribers(mqtt_config, topics, stop_event)
     event_queue = trigger_queue_from_topics(topics)
@@ -426,14 +604,22 @@ def run_software_continuous(
         raise SystemExit("software/continuous requires a subscribed trigger topic")
 
     interval = continuous_interval_s(trigger_config)
-    streaming = False
-    info(
-        "software/continuous idle; MQTT on/off arms capture every %.3fs",
-        interval,
-    )
+    streaming = trigger_on_startup_enabled(trigger_config)
+    if streaming:
+        info(
+            "software/continuous stream ON (trigger_on_startup); "
+            "capturing every %.3fs",
+            interval,
+        )
+    else:
+        info(
+            "software/continuous idle; MQTT on/off arms capture every %.3fs",
+            interval,
+        )
 
     time.sleep(0.1)
     while not stop_event.is_set():
+        apply_sku_updates(topics, archive_config)
         try:
             message = event_queue.get(timeout=0.1 if streaming else 1.0)
         except Empty:
@@ -454,6 +640,7 @@ def run_software_continuous(
         _capture_and_publish(
             client, camera, camera_config, image_outputs,
             base_image_topic, archive_config,
+            topics=topics, stop_event=stop_event,
         )
         # Drain any stop command that arrived during capture; otherwise wait.
         deadline = time.monotonic() + interval
@@ -473,6 +660,8 @@ def run_software_continuous(
 
 
 def run_hardware_path(
+    mqtt_config,
+    topics,
     client,
     camera,
     camera_config,
@@ -486,13 +675,16 @@ def run_hardware_path(
     """Hardware single (line/edge) or continuous (camera free-run stream).
 
     Both use ``wait_for_frame``; backends arm GenICam from injected trigger config.
+    Subscribed topics (including optional ``result``) are listened to as well.
     """
+    threads = start_subscribers(mqtt_config, topics, stop_event)
     event_queue: Queue = Queue(maxsize=1)
-    threads = [start_frame_thread(event_queue, camera, stop_event)]
+    threads.append(start_frame_thread(event_queue, camera, stop_event))
     info("hardware/%s waiting on camera frames", capture_type)
 
     time.sleep(0.1)
     while not stop_event.is_set():
+        apply_sku_updates(topics, archive_config)
         try:
             message = event_queue.get(timeout=1.0)
         except Empty:
@@ -509,6 +701,7 @@ def run_hardware_path(
         _capture_and_publish(
             client, camera, camera_config, image_outputs,
             base_image_topic, archive_config, image=message,
+            topics=topics, stop_event=stop_event,
         )
     return threads
 
@@ -527,6 +720,12 @@ def main(argv=None) -> int:
     camera_config = require(service, "camera")
     trigger_config = require(service, "trigger")
     archive_config = require(service, "archiving")
+    # Live SKU stamped into archive filenames; updated via mqtt topic name sku_update.
+    selected = archive_config.get("selected_sku")
+    if selected is None:
+        selected = service.get("selected_sku")
+    if selected is not None and str(selected).strip():
+        archive_config["selected_sku"] = str(selected).strip()
     camera_settings = service.get("camera_settings") or {}
     lights_config = service.get("lights") or {}
     image_outputs = resolve_image_outputs(service)
@@ -590,7 +789,7 @@ def main(argv=None) -> int:
             )
         else:
             threads = run_hardware_path(
-                client, camera, camera_config, image_outputs,
+                mqtt_config, topics, client, camera, camera_config, image_outputs,
                 base_image_topic, archive_config, stop_event,
                 capture_type=capture_type,
             )

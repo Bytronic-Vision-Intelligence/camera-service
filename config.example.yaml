@@ -29,6 +29,12 @@ mqtt:
     - name: image
       topic: "{project}/camera/{camera_id}/image"
       is_subscribe: false
+    # result: only needed when filename_categories includes verdict.
+    # Archive then waits for this message (status or verdict) and adds
+    # __pass / __fail. Tune archive_parameters.verdict_timeout_s (default 30).
+    # - name: result
+    #   topic: "{project}/inspection/{camera_id}/result_ready"
+    #   is_subscribe: true
 
 service:
   camera:
@@ -51,6 +57,7 @@ service:
     capture_type: single
     # trigger_delay: 1.0          # software/continuous interval (seconds)
     # continuous_fps: 2           # used if trigger_delay is 0
+    # trigger_on_startup: true    # software/continuous: start streaming without MQTT on
     # trigger_source: Line1       # hardware/single
     # trigger_activation: RisingEdge
 
@@ -70,6 +77,15 @@ service:
       archive_freq: daily
       archive_storage: 50
       archive_days: 30
+      # true uses uuid, camera_id, camera_type, image_type, sku_id, datetime, verdict.
+      # false replaces that order with filename_categories.
+      # sku_id is omitted until a selected_sku or a sku_update message supplies one.
+      # verdict is omitted until a subscribed topic named result supplies one.
+      default_order: true
+      # filename_categories:
+      #   - uuid
+      #   - camera_id
+      #   - datetime
 
 logging:
   level: INFO

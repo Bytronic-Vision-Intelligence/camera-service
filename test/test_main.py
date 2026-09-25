@@ -106,6 +106,11 @@ def test_topic_named_fills_placeholders():
     )
 
 
+def test_topic_by_name_returns_none_when_missing():
+    assert main.topic_by_name(make_topics(), "result") is None
+    assert main.topic_by_name(make_topics(), "image") == "project/camera/colour/image"
+
+
 def test_set_camera_class_injects_config(tmp_path):
     # Minimal bmp so DummyCamera.connect succeeds.
     frame = tmp_path / "frame.bmp"
@@ -261,6 +266,49 @@ def test_main_software_continuous_on_off(monkeypatch):
     assert fake_camera.disconnected is True
 
 
+def test_main_software_continuous_trigger_on_startup(monkeypatch):
+    config = make_config(
+        trigger={
+            "trigger_type": "software",
+            "capture_type": "continuous",
+            "trigger_delay": 0.01,
+            "trigger_on_startup": True,
+        }
+    )
+    monkeypatch.setattr(main.loadConfig, "get_config", lambda supplied=None: config)
+    monkeypatch.setattr(main, "MQTTClient", FakeMQTTClient)
+    monkeypatch.setattr(main, "MQTTConfig", FakeMQTTConfig)
+
+    fake_camera = FakeCamera()
+    monkeypatch.setattr(main, "set_camera_class", lambda *a, **k: fake_camera)
+
+    def fake_start(ip, port, topic, queue, stop_event):
+        # No MQTT arm — streaming must start from trigger_on_startup alone.
+        return FakeThread()
+
+    monkeypatch.setattr(main, "start_subscribe_thread", fake_start)
+
+    original = main.publish_outputs
+
+    def wrap(*args, **kwargs):
+        original(*args, **kwargs)
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(main, "publish_outputs", wrap)
+    monkeypatch.setattr(main.time, "sleep", lambda *_: None)
+
+    main.main(["--config", "stub.yaml"])
+    assert fake_camera.captured >= 1
+    assert fake_camera.disconnected is True
+
+
+def test_trigger_on_startup_enabled_truthy_values():
+    assert main.trigger_on_startup_enabled({"trigger_on_startup": True}) is True
+    assert main.trigger_on_startup_enabled({"trigger_on_startup": "true"}) is True
+    assert main.trigger_on_startup_enabled({"trigger_on_startup": False}) is False
+    assert main.trigger_on_startup_enabled({}) is False
+
+
 def test_main_rejects_unknown_trigger_type(monkeypatch):
     config = make_config(trigger={"trigger_type": "internal", "capture_type": "single"})
     monkeypatch.setattr(main.loadConfig, "get_config", lambda supplied=None: config)
@@ -298,3 +346,58 @@ def test_trigger_delay_from_message_ignores_other_camera_json_string():
     assert main.trigger_delay_from_message(raw, "depth_1") == 0.0
     assert main.trigger_delay_from_message(raw, "colour_1") == 0.5
     assert main.trigger_delay_from_message(raw, "missing") is None
+
+
+def test_archive_filename_follows_configured_categories():
+    from datetime import datetime
+
+    from dependencies.archive_functions import (
+        FILENAME_CATEGORIES,
+        build_archive_filename,
+        filename_categories,
+    )
+
+    when = datetime(2026, 9, 25, 10, 15, 25)
+    values = {
+        "camera_id": "colour_1",
+        "camera_type": "gige",
+        "image_type": "raw",
+        "sku_id": "salad",
+        "verdict": "fail",
+    }
+    categories = [
+        "uuid", "camera_id", "camera_type", "image_type", "sku_id", "datetime", "verdict",
+    ]
+    assert build_archive_filename(categories, values, when=when, archive_id="a3f9") == (
+        "a3f9__colour_1__gige__raw__salad__20260925_101525__fail.png"
+    )
+    assert build_archive_filename(
+        ["camera_id", "datetime"], values, when=when, archive_id="a3f9",
+    ) == "colour_1__20260925_101525.png"
+    assert build_archive_filename(
+        categories, {**values, "sku_id": None, "verdict": None},
+        when=when, archive_id="a3f9",
+    ) == "a3f9__colour_1__gige__raw__20260925_101525.png"
+    assert filename_categories({}) == list(FILENAME_CATEGORIES)
+    assert filename_categories({
+        "default_order": True,
+        "filename_categories": ["camera_id"],
+    }) == list(FILENAME_CATEGORIES)
+    assert filename_categories({
+        "default_order": False,
+        "filename_categories": ["verdict", "nope"],
+    }) == ["verdict"]
+
+
+def test_verdict_from_payload_reads_status_or_nested_verdict():
+    assert main.verdict_from_payload({"status": "pass", "active": True}) == "pass"
+    assert main.verdict_from_payload(
+        {"verdict": {"verdict": "fail", "reason_failed": ["eye_width"]}}
+    ) == "fail"
+    assert main.verdict_from_payload({"sku": "salad"}) is None
+
+
+def test_wait_for_verdict_returns_the_next_result():
+    queue = Queue()
+    queue.put('{"status": "fail"}')
+    assert main.wait_for_verdict(queue, timeout_s=1) == "fail"
