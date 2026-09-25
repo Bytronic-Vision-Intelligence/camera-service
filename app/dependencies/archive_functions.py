@@ -19,6 +19,11 @@ BIT_SCALE_15 = 32768.0
 ARCHIVE_ID_HEX_LEN = 8
 
 
+def new_capture_id() -> str:
+    """Short id shared by every camera that handled the same trigger."""
+    return uuid.uuid4().hex[:ARCHIVE_ID_HEX_LEN]
+
+
 def _filename_token(value, default: str) -> str:
     """Keep a filename field free of path separators and the ``__`` delimiter."""
     text = str(value).strip() if value is not None else ""
@@ -38,12 +43,12 @@ def _filename_token(value, default: str) -> str:
 
 # Locked filename order when ``default_order`` is true. A missing value is left out.
 FILENAME_CATEGORIES = (
+    "datetime",
     "uuid",
     "camera_id",
     "camera_type",
     "image_type",
     "sku_id",
-    "datetime",
     "verdict",
 )
 

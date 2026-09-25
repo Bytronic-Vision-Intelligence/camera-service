@@ -151,46 +151,46 @@ def build_packet_list(
     *,
     image_id: str,
     date_time: str,
+    capture_id: str | None = None,
     max_packet_bytes: int = DEFAULT_MAX_PACKET_BYTES,
 ) -> list[dict]:
     """Build ``[{topic, payload}, ...]`` for ``client.publish_many``."""
     parts = divide_image_packets(image, max_packet_bytes=max_packet_bytes)
+
+    def _payload(part: dict, *, split: bool) -> dict:
+        payload = {
+            "image": part["image"],
+            "date_time": date_time,
+            "image_id": image_id,
+            "encoding": part["encoding"],
+        }
+        if capture_id:
+            payload["capture_id"] = capture_id
+        if split:
+            payload.update(
+                {
+                    "packet_number": part["packet_number"],
+                    "packet_count": part["packet_count"],
+                    "y0": part["y0"],
+                    "y1": part["y1"],
+                    "x0": part["x0"],
+                    "x1": part["x1"],
+                    "full_height": part["full_height"],
+                    "full_width": part["full_width"],
+                }
+            )
+        return payload
+
     if len(parts) == 1:
-        part = parts[0]
-        return [
-            {
-                "topic": topic,
-                "payload": {
-                    "image": part["image"],
-                    "date_time": date_time,
-                    "image_id": image_id,
-                    "encoding": part["encoding"],
-                },
-            }
-        ]
+        return [{"topic": topic, "payload": _payload(parts[0], split=False)}]
 
     group_id = f"{date_time}|{image_id}|{time.time_ns()}"
-    return [
-        {
-            "topic": topic,
-            "payload": {
-                "group_id": group_id,
-                "packet_number": part["packet_number"],
-                "packet_count": part["packet_count"],
-                "image": part["image"],
-                "date_time": date_time,
-                "image_id": image_id,
-                "encoding": part["encoding"],
-                "y0": part["y0"],
-                "y1": part["y1"],
-                "x0": part["x0"],
-                "x1": part["x1"],
-                "full_height": part["full_height"],
-                "full_width": part["full_width"],
-            },
-        }
-        for part in parts
-    ]
+    packets = []
+    for part in parts:
+        payload = _payload(part, split=True)
+        payload["group_id"] = group_id
+        packets.append({"topic": topic, "payload": payload})
+    return packets
 
 
 def parse_image_outputs(images_config) -> list[dict]:

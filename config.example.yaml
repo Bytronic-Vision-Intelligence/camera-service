@@ -77,7 +77,7 @@ service:
       archive_freq: daily
       archive_storage: 50
       archive_days: 30
-      # true uses uuid, camera_id, camera_type, image_type, sku_id, datetime, verdict.
+      # true uses datetime, uuid, camera_id, camera_type, image_type, sku_id, verdict.
       # false replaces that order with filename_categories.
       # sku_id is omitted until a selected_sku or a sku_update message supplies one.
       # verdict is omitted until a subscribed topic named result supplies one.

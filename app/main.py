@@ -16,6 +16,7 @@ from dependencies.archive_functions import (
     archive_image,
     build_archive_filename,
     filename_categories,
+    new_capture_id,
 )
 from dependencies.image_functions import (
     apply_image_format,
@@ -288,10 +289,14 @@ def publish_outputs(
     archive_config: dict,
     topics: list | None = None,
     stop_event: Event | None = None,
+    capture_id: str | None = None,
 ) -> None:
     """Format, publish, then archive. Archive waits for a result topic when set."""
     date_time = encode_date_time_to_bytes().decode("utf-8")
     timestamp = time.strftime("%Y%m%d_%H%M%S")
+    capture_id = str(capture_id).strip() if capture_id else ""
+    if not capture_id:
+        capture_id = new_capture_id()
     archived = require(archive_config, "is_archived")
     is_archived = str(archived).strip().lower() in {"1", "true", "yes", "on"}
 
@@ -354,6 +359,7 @@ def publish_outputs(
             variant,
             image_id=output["id"],
             date_time=date_time,
+            capture_id=capture_id,
         )
         info(
             "Publishing %s image packet(s) to %s",
@@ -389,6 +395,7 @@ def publish_outputs(
                 "sku_id": sku_id,
                 "datetime": timestamp,
                 "verdict": verdict,
+                "uuid": capture_id,
             },
         )
         archive_image(
@@ -410,6 +417,7 @@ def _capture_and_publish(
     image=None,
     topics: list | None = None,
     stop_event: Event | None = None,
+    capture_id: str | None = None,
 ) -> None:
     start_time = time.time()
     info("Capturing image...")
@@ -433,6 +441,7 @@ def _capture_and_publish(
         archive_config,
         topics,
         stop_event,
+        capture_id,
     )
     info(
         "Image published in %.3fs.",
@@ -458,6 +467,16 @@ def _parse_mqtt_dict(message) -> dict | None:
     except (JSONDecodeError, TypeError):
         return None
     return parsed if isinstance(parsed, dict) else None
+
+
+def capture_id_from_message(message) -> str | None:
+    """Read the shared capture id stamped on a trigger payload."""
+    data = _parse_mqtt_dict(message)
+    if not data:
+        return None
+    raw = data.get("capture_id")
+    text = str(raw).strip() if raw is not None else ""
+    return text or None
 
 
 def trigger_delay_from_message(message, camera_id: str) -> float | None:
@@ -514,6 +533,7 @@ def run_software_single(
             client, camera, camera_config, image_outputs,
             base_image_topic, archive_config,
             topics=topics, stop_event=stop_event,
+            capture_id=capture_id_from_message(message),
         )
     return threads
 

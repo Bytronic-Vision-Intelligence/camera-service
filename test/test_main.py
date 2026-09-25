@@ -322,6 +322,13 @@ def test_main_refuses_an_empty_config_path(monkeypatch):
         main.main(["--config", ""])
 
 
+def test_capture_id_from_message_reads_the_trigger_stamp():
+    assert main.capture_id_from_message(
+        {"capture_id": "a3f91c02", "colour_1": ["trigger", 0]}
+    ) == "a3f91c02"
+    assert main.capture_id_from_message({"colour_1": ["trigger", 0]}) is None
+
+
 def test_trigger_delay_from_message_uses_camera_id_list():
     payload = {
         "colour_1": ["trigger", 0.5],
