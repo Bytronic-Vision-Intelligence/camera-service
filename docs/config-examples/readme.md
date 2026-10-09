@@ -22,7 +22,7 @@ out of agreement with the code that read them, and are corrected here:
 * MQTT topics may use `{project}` / `{camera_id}` placeholders, filled at
   startup.
 * Prefer the `images:` multi-output list (each entry can set `topic_end`,
-  `image_format`, `archive`) over a single `image:` block.
+  `image_format`, `archive`, `encoding`) over a single `image:` block.
 * `capture_timout` was a typo, and `10` meant ten *milliseconds* — enough for a
   real Pylon or FLIR grab to time out on every trigger. It is `capture_timeout`
   here, at a workable 5000.

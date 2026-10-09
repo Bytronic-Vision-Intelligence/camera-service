@@ -66,6 +66,9 @@ service:
         image_format: null
         topic_end: null
         archive: true
+        # encoding: png             # png | jpeg; null = PNG for 16-bit, JPEG for 8-bit.
+        #                           # png keeps 8-bit frames lossless for analysis
+        #                           # (~8x larger than JPEG on the wire).
 
   camera_settings: {}
   lights: {}

@@ -208,3 +208,50 @@ def test_resolve_image_outputs_defaults_without_images_key():
     assert outputs[0]["id"] == "default"
     assert outputs[0]["rotate"] is None
     assert outputs[0]["crop"] is None
+    assert outputs[0]["encoding"] is None
+
+
+def test_encoding_png_keeps_an_8bit_colour_frame_lossless():
+    rng = np.random.default_rng(0)
+    img = rng.integers(0, 256, (16, 16, 3), dtype=np.uint8)
+
+    out = decode_image_from_bytes(encode_image_to_bytes(img, "png"))
+
+    assert image_encoding(img, "png") == "png"
+    assert np.array_equal(out, img)
+
+
+def test_default_encoding_is_unchanged_jpeg_for_8bit():
+    rng = np.random.default_rng(0)
+    img = rng.integers(0, 256, (16, 16, 3), dtype=np.uint8)
+
+    data = encode_image_to_bytes(img)
+
+    assert data[:2] == b"\xff\xd8"  # JPEG start-of-image marker
+    assert image_encoding(img) == "jpeg"
+
+
+def test_encoding_jpeg_can_be_forced_for_uint16():
+    img = np.array([[0, 4096], [8192, 65535]], dtype=np.uint16)
+
+    data = encode_image_to_bytes(img, "jpeg")
+
+    assert data[:2] == b"\xff\xd8"
+    assert image_encoding(img, "jpeg") == "jpeg"
+
+
+def test_parse_image_outputs_reads_encoding():
+    outputs = parse_image_outputs(
+        [
+            {"rgb": {"topic_end": None}},
+            {"rgb_png": {"topic_end": "png", "encoding": "PNG"}},
+            {"rgb_jpeg": {"topic_end": "jpeg", "encoding": "jpeg"}},
+        ]
+    )
+
+    assert [o["encoding"] for o in outputs] == [None, "png", "jpeg"]
+
+
+def test_parse_image_outputs_rejects_an_unknown_encoding():
+    with pytest.raises(ValueError, match="rgb.*encoding"):
+        parse_image_outputs([{"rgb": {"encoding": "tiff"}}])
