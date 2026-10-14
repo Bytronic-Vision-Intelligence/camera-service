@@ -1,17 +1,65 @@
 import cv2
 import logging
 from numpy import ndarray
-
+from threading import Event, Thread
+from time import sleep
 
 class Camera:
     def __init__(self):
-        self.camera = None
-        self.cam = None
+        self.camera = any
+        self.cam = self.camera
+        self.framerate = 60
+        self.frame_pace = 1/self.framerate
+
+        self.trigger_type = str()
+        self.capture_type = str()
+
+        self.buffer = []
+        self.buffer_position = 0
+
+        self.capture_thread = self.__create_capture_thread()
+        if self.capture_thread!=None:self.capture_thread.start()
+
         # Injected by main.set_camera_class before connect_to_camera().
+        # are these really nessacary? can we not set this up in a better way?
         self.camera_config: dict = {}
         self.trigger_config: dict = {}
         self.camera_settings: dict = {}
         self.lights_config: dict = {}
+
+    def read_from_buffer(self, buffer:list,position:int=0):
+        '''reads from the camera buffer
+        Args:
+            position: the buffer position to read from
+        '''
+        if position > len(buffer):
+            raise ValueError(f"Error : Buffer value of {position} is larger than buffer size of {len(self.buffer)}")
+        safe_read = position-1%len(self.buffer)
+        image = buffer[safe_read]
+        return image
+
+    def __create_capture_thread(self)-> Thread:
+        if self.capture_type == "software":
+            software_thread = Thread(
+                target=self.__software_continuous_read(),
+                daemon=True
+            )
+            return software_thread
+        if self.capture_type == "hardware":
+            hardware_thread = Thread(
+                target=self.camera.wait_for_frame,
+                args=(self.capture_thread, Event),
+                daemon=True,
+            )
+            return hardware_thread
+        return None
+
+    def __software_continuous_read(self):
+        '''captures an image, adds it to the buffer continuously'''
+        image = self.capture_image()
+        position = position+1 % len(self.buffer)
+        self.buffer[position] = image
+        sleep(self.frame_pace)
 
     def connect_to_camera(self):
         """Connect to the camera based on the specified camera type.
@@ -21,7 +69,6 @@ class Camera:
         # subsequent calls to `capture_image` can use the same handle.
         self.camera = cv2.VideoCapture(0)
         if not getattr(self.camera, "isOpened", lambda: False)():
-            # Ensure camera resources are released if open failed
             try:
                 self.camera.release()
             except Exception:
@@ -61,7 +108,6 @@ class Camera:
         if self.cam is handle:
             self.cam = None
         logging.info("OpenCV camera disconnected")
-
 
 class CameraHeightMap(Camera):
     "Used for height map cameras"

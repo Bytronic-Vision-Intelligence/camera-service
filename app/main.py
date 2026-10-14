@@ -1,3 +1,5 @@
+from dependencies.state_machine.camera_state_machine import CameraSM
+
 import base64
 import json
 import signal
@@ -174,6 +176,7 @@ def continuous_interval_s(trigger_config: dict) -> float:
         raise SystemExit(
             f"service.trigger.trigger_delay must be >= 0{where}"
         )
+    
     if delay > 0:
         return delay
     try:
@@ -528,6 +531,9 @@ def run_hardware_path(
 def main(argv=None) -> int:
     args = loadConfig.parse_cli(argv)
     config = loadConfig.get_config(args.config)
+    camera_sm = CameraSM(config)
+    while True:
+        camera_sm.runtime()
 
     log_settings = config.get("logging") or {}
     logging_setup.configure(log_settings.get("level", logging_setup.DEFAULT_LEVEL))

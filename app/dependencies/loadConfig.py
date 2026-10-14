@@ -116,3 +116,13 @@ def parse_cli(argv=None) -> argparse.Namespace:
         help="configuration to run with. Required: a service never looks for "
              "one on its own, so it cannot start the wrong instance.")
     return parser.parse_args(argv)
+
+def require(config: dict, key: str):
+    """Return a required config value, or exit describing what is missing."""
+    if key not in config or config[key] is None:
+        try:
+            where = f" in {config_path()}"
+        except SystemExit:
+            where = ""
+        raise SystemExit(f"Missing required config key '{key}'{where}")
+    return config[key]
