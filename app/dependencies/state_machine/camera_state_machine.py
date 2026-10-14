@@ -5,7 +5,6 @@ from ..image_functions import resolve_image_outputs
 
 class CameraSM(StateMachine):
     def __init__(self, config:dict):
-        super().__init__(config)
         camera_config = require(config,"service")
         self.camera = self.__set_camera_class(
             camera_config
@@ -16,9 +15,11 @@ class CameraSM(StateMachine):
         self.camera.connect_to_camera()
 
         self.image_output = resolve_image_outputs(config)
-        self.burst_length = require(config,"burst_length")
-        self.exposure = require(config, "exposure")
+        self.burst_length = require(camera_config.get("camera_settings"),"burst_length")
+        self.exposure = require(camera_config.get("camera_settings"), "exposure")
         self.state = self.set_idle()
+
+        super().__init__(config)
 
 
     def __set_camera_class(self,camera_config: dict):
@@ -28,10 +29,10 @@ class CameraSM(StateMachine):
         instance before ``connect_to_camera`` so they never call back into
         ``loadConfig``.
         """
-        camera_type = require(camera_config,"camera_type")
         trigger_config = require(camera_config,"trigger")
         camera_settings = require(camera_config,"camera_settings")
         lights_config = require(camera_config,"lights")
+        camera_type = require(camera_config.get("camera"), "camera_type")
 
         if not camera_type:
             raise ValueError("Camera type cannot be empty.")

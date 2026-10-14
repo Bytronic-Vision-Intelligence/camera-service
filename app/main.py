@@ -531,12 +531,13 @@ def run_hardware_path(
 def main(argv=None) -> int:
     args = loadConfig.parse_cli(argv)
     config = loadConfig.get_config(args.config)
+    log_settings = config.get("logging") or {}
+    logging_setup.configure(log_settings.get("level", logging_setup.DEFAULT_LEVEL))
+
     camera_sm = CameraSM(config)
     while True:
         camera_sm.runtime()
 
-    log_settings = config.get("logging") or {}
-    logging_setup.configure(log_settings.get("level", logging_setup.DEFAULT_LEVEL))
 
     mqtt_config = require(config, "mqtt")
     topics = require(mqtt_config, "topics")

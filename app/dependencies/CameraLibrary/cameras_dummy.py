@@ -20,10 +20,11 @@ class DummyCamera(Camera):
         self.frame_list = []
 
     def connect_to_camera(self):
-        directory = self.camera_config.get("dummy_location")
+        config = self.camera_config.get("camera")
+        directory = config.get("dummy_location")
         if not directory:
             raise RuntimeError("camera.dummy_location is required for dummy cameras")
-        extension = str(self.camera_config.get("file_type") or ".png")
+        extension = str(config.get("file_type") or ".png")
         if not extension.startswith("."):
             extension = f".{extension}"
         self._get_frame_list(Path(directory), extension)

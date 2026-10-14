@@ -11,7 +11,7 @@ class IdleState(State):
     def tick(self):
         '''Waits for a message to be received from the target, 
         then switches to the appropriate state'''
-        self.__mqtt_watchdog()
+        if not self.__mqtt_watchdog():return
         message = check_for_messages(self.my_state_machine.trigger_request)
         if not "matches_found" in message: return
         if message.get("matches_found") == 0: return
@@ -26,6 +26,7 @@ class IdleState(State):
     def __mqtt_watchdog(self):
         '''a simple process that checks the state of the client and 
         reconnects if the beoker disconnects due to being idle'''
-        if self.my_state_machine.mqtt_client.is_connected: return
+        if self.my_state_machine.mqtt_client.is_connected: return True
         print("Info : mqtt client disconnected, reconnecting")
         self.my_state_machine.mqtt_client.connect()
+        return False

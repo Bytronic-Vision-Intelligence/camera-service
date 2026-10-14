@@ -1,4 +1,4 @@
-from app.dependencies.state_machine.base_functions.state import State
+from dependencies.state_machine.base_functions.state import State
 
 class GetBestFrameState(State):
     ''''''
@@ -7,4 +7,4 @@ class GetBestFrameState(State):
 
     def tick(self):
         ''''''
-        
+

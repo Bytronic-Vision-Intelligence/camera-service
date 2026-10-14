@@ -52,6 +52,7 @@ docs/superpowers/
 .claude/
 CLAUDE.md
 .DS_Store
+*dev
 
 # Logs
 *.log
