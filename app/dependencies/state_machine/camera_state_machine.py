@@ -14,10 +14,11 @@ class CameraSM(StateMachine):
         )
         self.camera.connect_to_camera()
 
-        self.image_output = resolve_image_outputs(config)
+        self.image_outputs = resolve_image_outputs(config)
         self.burst_length = require(camera_config.get("camera_settings"),"burst_length")
         self.exposure = require(camera_config.get("camera_settings"), "exposure")
         self.state = self.set_idle()
+        self.archiving = camera_config.get("archiving")
 
         super().__init__(config)
 
@@ -60,6 +61,7 @@ class CameraSM(StateMachine):
         camera.camera_config = camera_config
         camera.trigger_config = trigger_config
         camera.camera_settings = camera_settings or {}
+        camera.buffer = [0 for _ in range(camera_settings.get("buffer_size"))]
         camera.lights_config = lights_config if isinstance(lights_config, dict) else {}
         return camera
 

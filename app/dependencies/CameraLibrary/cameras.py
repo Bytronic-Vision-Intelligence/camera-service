@@ -26,6 +26,7 @@ class Camera:
         self.trigger_config: dict = {}
         self.camera_settings: dict = {}
         self.lights_config: dict = {}
+        self.image_outputs = {}
 
     def read_from_buffer(self, buffer:list,position:int=0):
         '''reads from the camera buffer
@@ -57,7 +58,7 @@ class Camera:
     def __software_continuous_read(self):
         '''captures an image, adds it to the buffer continuously'''
         image = self.capture_image()
-        position = position+1 % len(self.buffer)
+        position = self.position+1 % len(self.buffer)
         self.buffer[position] = image
         sleep(self.frame_pace)
 

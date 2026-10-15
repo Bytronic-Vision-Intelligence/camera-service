@@ -3,6 +3,7 @@ from ..CameraLibrary.cameras import Camera
 from .publish_state import PublishState
 from .get_best_frame_state import GetBestFrameState
 from time import sleep
+from datetime import datetime
 class CaptureState(State):
     ''''''
     def __init__(self, 
@@ -58,9 +59,14 @@ class CaptureState(State):
 
     def __get_image(self,camera:Camera):
         if camera.capture_thread==None:
-            return camera.capture_image()
-        
-        return camera.read_from_buffer(
-            camera.buffer,
-            camera.buffer_position
-        )
+            image =  camera.capture_image()
+        else:
+            image =  camera.read_from_buffer(
+                camera.buffer,
+                camera.buffer_position
+            )
+        capture_time = datetime.now()
+        return {
+            "image": image,
+            "capture_time": capture_time
+        }
