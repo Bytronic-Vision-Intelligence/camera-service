@@ -306,10 +306,15 @@ def publish_outputs(
     archived = require(archive_config, "is_archived")
     is_archived = str(archived).strip().lower() in {"1", "true", "yes", "on"}
 
+    t_start = time.perf_counter()
     prepared = []
+    formatted = {}   # outputs with the same rotate/crop/format share one formatted frame
     for output in image_outputs:
+        key = repr((output.get("rotate"), output.get("crop"), output.get("image_format")))
         try:
-            variant = apply_image_format(image, output)
+            if key not in formatted:
+                formatted[key] = apply_image_format(image, output)
+            variant = formatted[key]
         except Exception as exc:
             error(
                 "Failed to apply image_format for image %s: %s",
@@ -358,9 +363,12 @@ def publish_outputs(
         elif to_archive:
             warning("No sku selected yet; archiving without a sku")
 
+    t_formatted = time.perf_counter()
+    steps = [f"format {t_formatted - t_start:.2f}"]
     for output, variant in prepared:
         topic = build_image_topic(base_image_topic, output["topic_end"])
         encoding = output.get("encoding")
+        t0 = time.perf_counter()
         image_bytes = encode_image_to_bytes(variant, encoding)
         packet = {
             "image": base64.b64encode(image_bytes).decode("ascii"),
@@ -368,6 +376,7 @@ def publish_outputs(
             "image_id": output["id"],
             "encoding": image_encoding(variant, encoding),
         }
+        t1 = time.perf_counter()
 
         info(
             "Publishing image %s to %s (size %s)",
@@ -385,6 +394,8 @@ def publish_outputs(
                 topic,
                 exc,
             )
+        steps.append(f"{output['id']} encode {t1 - t0:.2f} publish {time.perf_counter() - t1:.2f}")
+    t_published = time.perf_counter()
 
     verdict = None
     if to_archive and result_queue is not None:
@@ -420,6 +431,9 @@ def publish_outputs(
             require(archive_config, "archive_parameters"),
             require(camera_config, "camera_id"),
         )
+    steps.append(f"archive {time.perf_counter() - t_published:.2f}")
+    info("Frame %s publish timing s: %s, total %.2f", date_time.decode("utf-8"), ", ".join(steps),
+         time.perf_counter() - t_start)
 
 
 def _capture_and_publish(
@@ -566,7 +580,8 @@ def run_software_single(
             message = event_queue.get(timeout=1.0)
         except Empty:
             continue
-        received = time.perf_counter()
+        # from when the trigger reached this service, including any wait in the queue
+        received = getattr(event_queue, "received_at", None) or time.perf_counter()
         delay = trigger_delay_from_message(message, camera_id)
         if delay is None:
             continue

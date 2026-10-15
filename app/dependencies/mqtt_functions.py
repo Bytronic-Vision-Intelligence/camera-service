@@ -1,4 +1,5 @@
 import logging
+import time
 from queue import Empty, Full, Queue
 from threading import Event, Thread
 
@@ -55,6 +56,8 @@ def subscribe_listener(
     def on_message(topic: str, payload: str) -> None:
         # Handler signature used by mqtt_client.MQTTClient.subscribe
         logging.info("Request received: %s", topic)
+        # when the newest message arrived, so a consumer can tell how long it waited
+        result_queue.received_at = time.perf_counter()
         decoded = payload
         # Keep only the newest trigger to avoid replaying stale backlog bursts.
         # A camera that fell behind should take the picture being asked for
