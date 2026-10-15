@@ -293,10 +293,16 @@ def publish_outputs(
     archive_config: dict,
     topics: list | None = None,
     stop_event: Event | None = None,
+    date_time: bytes | None = None,
+    captured_at: datetime.datetime | None = None,
 ) -> None:
-    """Format, publish, then archive. Archive waits for a result topic when set."""
-    date_time = encode_date_time_to_bytes()
-    captured_at = datetime.datetime.now()
+    """Format, publish, then archive. Archive waits for a result topic when set.
+
+    date_time / captured_at: when the frame was taken (default: now), for a
+    frame published later than it was captured.
+    """
+    date_time = date_time or encode_date_time_to_bytes()
+    captured_at = captured_at or datetime.datetime.now()
     archived = require(archive_config, "is_archived")
     is_archived = str(archived).strip().lower() in {"1", "true", "yes", "on"}
 
@@ -496,6 +502,39 @@ def trigger_delay_from_message(message, camera_id: str) -> float | None:
         return None
 
 
+#: Captured frames waiting to be published before a new capture waits for room.
+PUBLISH_BACKLOG = 4
+
+
+def start_publish_worker(stop_event: Event) -> tuple[Queue, Thread]:
+    """A thread that runs queued publish jobs in capture order.
+
+    Encoding, publishing and archiving a frame takes a few hundred ms; done on
+    the trigger loop, a trigger that came meanwhile waited for it, so packs
+    were shot late by a varying amount. The worker finishes the queued frames
+    after stop_event is set, then exits.
+    """
+    jobs: Queue = Queue(maxsize=PUBLISH_BACKLOG)
+
+    def run() -> None:
+        while not (stop_event.is_set() and jobs.empty()):
+            try:
+                job = jobs.get(timeout=0.2)
+            except Empty:
+                continue
+            try:
+                job()
+            except Exception as exc:
+                error("Publishing a frame failed; skipping it: %s", exc, exc_info=True)
+            except BaseException:   # KeyboardInterrupt / SystemExit: stop the service
+                stop_event.set()
+                return
+
+    thread = Thread(target=run, name="publish", daemon=True)
+    thread.start()
+    return jobs, thread
+
+
 def run_software_single(
     mqtt_config,
     topics,
@@ -507,11 +546,17 @@ def run_software_single(
     archive_config,
     stop_event: Event,
 ) -> list:
-    """MQTT trigger message → one software capture for this camera_id."""
+    """MQTT trigger message → one software capture for this camera_id.
+
+    Only the capture runs on this loop, so the next trigger is served at once;
+    the frame is published and archived on a worker thread.
+    """
     threads = start_subscribers(mqtt_config, topics, stop_event)
     event_queue = trigger_queue_from_topics(topics)
     if event_queue is None:
         raise SystemExit("software/single requires a subscribed trigger topic")
+    jobs, worker = start_publish_worker(stop_event)
+    threads.append(worker)
 
     camera_id = str(require(camera_config, "camera_id"))
     time.sleep(0.1)
@@ -521,16 +566,29 @@ def run_software_single(
             message = event_queue.get(timeout=1.0)
         except Empty:
             continue
+        received = time.perf_counter()
         delay = trigger_delay_from_message(message, camera_id)
         if delay is None:
             continue
         if delay > 0:
             time.sleep(delay)
-        _capture_and_publish(
-            client, camera, camera_config, image_outputs,
-            base_image_topic, archive_config,
-            topics=topics, stop_event=stop_event,
-        )
+        date_time, captured_at = encode_date_time_to_bytes(), datetime.datetime.now()
+        try:
+            image = camera.capture_image(timeout_ms=require(camera_config, "capture_timeout"))
+        except Exception as exc:
+            error("Capture failed; skipping: %s", exc, exc_info=True)
+            continue
+        if image is None:
+            error("No image available to encode.")
+            continue
+        info("Captured %s %.0f ms after the trigger message", date_time.decode("utf-8"),
+             (time.perf_counter() - received) * 1000)
+        if jobs.full():
+            warning("Publishing is %d frames behind; this capture waits for room", jobs.qsize())
+        jobs.put(lambda image=image, date_time=date_time, captured_at=captured_at: publish_outputs(
+            client, image, image_outputs, base_image_topic, camera_config, archive_config,
+            topics, stop_event, date_time=date_time, captured_at=captured_at,
+        ))
     return threads
 
 

@@ -67,7 +67,9 @@ def test_encode_date_time_is_utf8_and_parseable():
     raw = encode_date_time_to_bytes()
 
     assert isinstance(raw, bytes)
-    datetime.strptime(raw.decode("utf-8"), "%Y-%m-%d %H:%M:%S")
+    text = raw.decode("utf-8")
+    datetime.strptime(text, "%Y-%m-%d %H:%M:%S.%f")
+    assert len(text.rsplit(".", 1)[1]) == 3   # milliseconds: frames in one second differ
 
 
 def test_parse_image_outputs_reads_ids_and_flags():

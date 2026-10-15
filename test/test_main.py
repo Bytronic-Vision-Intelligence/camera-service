@@ -220,6 +220,25 @@ def test_main_software_single_captures_and_publishes(monkeypatch):
     assert fake_camera.disconnected is True
 
 
+def test_publish_worker_runs_jobs_in_order_and_finishes_them_on_stop():
+    from threading import Event
+
+    stop = Event()
+    jobs, worker = main.start_publish_worker(stop)
+    done = []
+
+    def failing():
+        raise RuntimeError("encode failed")
+
+    for job in (lambda: done.append(1), failing, lambda: done.append(2), lambda: done.append(3)):
+        jobs.put(job)
+    stop.set()
+    worker.join(timeout=5)
+
+    assert not worker.is_alive()
+    assert done == [1, 2, 3]   # a failing frame does not stop the ones after it
+
+
 def test_continuous_stream_command_on_off():
     assert main.continuous_stream_command('{"active": true}') is True
     assert main.continuous_stream_command('{"active": false}') is False

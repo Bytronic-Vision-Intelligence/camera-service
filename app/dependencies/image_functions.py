@@ -1,6 +1,6 @@
 import numpy as np
 import cv2
-from time import localtime, strftime
+from datetime import datetime
 
 
 def prepare_image_for_jpeg(image: np.ndarray) -> np.ndarray:
@@ -66,8 +66,12 @@ def _parse_encoding(image_id: str, encoding) -> str | None:
 
 
 def encode_date_time_to_bytes() -> bytes:
-    """Encode the current date and time into bytes."""
-    date_time = strftime("%Y-%m-%d %H:%M:%S", localtime())
+    """Encode the current local date and time, to the millisecond, into bytes.
+
+    Analysis services match an inference result to its frame by this text, so
+    two frames in the same second must not share it.
+    """
+    date_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
     return date_time.encode("utf-8")
 
 
