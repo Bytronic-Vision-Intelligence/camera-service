@@ -465,9 +465,10 @@ class GigeCamera(Camera):
             camera.start()
 
         try:
-            self._ensure_lights_for_capture(camera)
             if self.trigger_type == "software":
                 camera.remote_device.node_map.TriggerSoftware.execute()
+                # when the camera was told to expose: the pack's position in the frame
+                self.last_trigger_at = time.perf_counter()
             with camera.fetch(timeout=timeout_ms / 1000.0) as buffer:
                 component = buffer.payload.components[0]
                 raw = np.asarray(component.data)
@@ -489,6 +490,9 @@ class GigeCamera(Camera):
         except Exception as e:
             logging.error("fetch raised an exception")
             raise RuntimeError("Failed to grab image") from e
+        # Strobe check after the frame, not before the trigger: its register reads over
+        # GigE would delay the shot. A reset LineSource is restored for the next frame.
+        self._ensure_lights_for_capture(camera)
 
         if is_converted and self.pixel_format:
             if "BayerRG" in self.pixel_format:

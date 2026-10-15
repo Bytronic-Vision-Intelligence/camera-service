@@ -581,8 +581,11 @@ def run_software_single(
         if image is None:
             error("No image available to encode.")
             continue
-        info("Captured %s %.0f ms after the trigger message", date_time.decode("utf-8"),
-             (time.perf_counter() - received) * 1000)
+        # shot: the camera told to expose (sets where the pack is); ready: frame transferred
+        shot_at = getattr(camera, "last_trigger_at", None)
+        shot = f"shot {(shot_at - received) * 1000:.0f} ms, " if shot_at and shot_at >= received else ""
+        info("Captured %s: %sframe ready %.0f ms after the trigger message", date_time.decode("utf-8"),
+             shot, (time.perf_counter() - received) * 1000)
         if jobs.full():
             warning("Publishing is %d frames behind; this capture waits for room", jobs.qsize())
         jobs.put(lambda image=image, date_time=date_time, captured_at=captured_at: publish_outputs(
