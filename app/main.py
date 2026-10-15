@@ -518,15 +518,19 @@ def trigger_delay_from_message(message, camera_id: str) -> float | None:
 
 #: Captured frames waiting to be published before a new capture waits for room.
 PUBLISH_BACKLOG = 4
+#: Frames encoded at once. A full-size PNG takes 0.5-0.9 s to encode on the Dunbia PC,
+#: about one pack interval, so one worker falls behind; OpenCV encodes outside the GIL.
+PUBLISH_WORKERS = 2
 
 
-def start_publish_worker(stop_event: Event) -> tuple[Queue, Thread]:
-    """A thread that runs queued publish jobs in capture order.
+def start_publish_worker(stop_event: Event, workers: int = PUBLISH_WORKERS) -> tuple[Queue, list]:
+    """Threads that run queued publish jobs, oldest first.
 
-    Encoding, publishing and archiving a frame takes a few hundred ms; done on
+    Encoding, publishing and archiving a frame takes up to a second; done on
     the trigger loop, a trigger that came meanwhile waited for it, so packs
-    were shot late by a varying amount. The worker finishes the queued frames
-    after stop_event is set, then exits.
+    were shot late by a varying amount. With several workers frames can be
+    published slightly out of order; consumers match frames by date_time. The
+    workers finish the queued frames after stop_event is set, then exit.
     """
     jobs: Queue = Queue(maxsize=PUBLISH_BACKLOG)
 
@@ -544,9 +548,10 @@ def start_publish_worker(stop_event: Event) -> tuple[Queue, Thread]:
                 stop_event.set()
                 return
 
-    thread = Thread(target=run, name="publish", daemon=True)
-    thread.start()
-    return jobs, thread
+    threads = [Thread(target=run, name=f"publish-{i}", daemon=True) for i in range(max(1, workers))]
+    for thread in threads:
+        thread.start()
+    return jobs, threads
 
 
 def run_software_single(
@@ -569,8 +574,8 @@ def run_software_single(
     event_queue = trigger_queue_from_topics(topics)
     if event_queue is None:
         raise SystemExit("software/single requires a subscribed trigger topic")
-    jobs, worker = start_publish_worker(stop_event)
-    threads.append(worker)
+    jobs, workers = start_publish_worker(stop_event)
+    threads.extend(workers)
 
     camera_id = str(require(camera_config, "camera_id"))
     time.sleep(0.1)

@@ -224,7 +224,7 @@ def test_publish_worker_runs_jobs_in_order_and_finishes_them_on_stop():
     from threading import Event
 
     stop = Event()
-    jobs, worker = main.start_publish_worker(stop)
+    jobs, (worker,) = main.start_publish_worker(stop, workers=1)
     done = []
 
     def failing():
@@ -237,6 +237,22 @@ def test_publish_worker_runs_jobs_in_order_and_finishes_them_on_stop():
 
     assert not worker.is_alive()
     assert done == [1, 2, 3]   # a failing frame does not stop the ones after it
+
+
+def test_publish_workers_encode_frames_side_by_side():
+    import time
+    from threading import Event
+
+    stop = Event()
+    jobs, workers = main.start_publish_worker(stop, workers=2)
+    start = time.perf_counter()
+    for _ in range(2):
+        jobs.put(lambda: time.sleep(0.3))   # a slow encode that releases the GIL
+    stop.set()
+    for worker in workers:
+        worker.join(timeout=5)
+
+    assert time.perf_counter() - start < 0.55
 
 
 def test_continuous_stream_command_on_off():
