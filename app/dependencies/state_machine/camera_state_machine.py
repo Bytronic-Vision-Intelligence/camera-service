@@ -57,7 +57,7 @@ class CameraSM(StateMachine):
         else:
             raise ValueError(f"Unsupported camera type: {camera_type}")
 
-        camera.camera_config = camera_config
+        camera.camera_config = camera_config.get("camera")
         camera.trigger_config = trigger_config
         camera.camera_settings = camera_settings or {}
         camera.buffer = [0 for _ in range(camera_settings.get("buffer_size"))]

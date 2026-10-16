@@ -20,7 +20,7 @@ class DummyCamera(Camera):
         self.frame_list = []
 
     def connect_to_camera(self):
-        config = self.camera_config.get("camera")
+        config = self.camera_config
         directory = config.get("dummy_location")
         if not directory:
             raise RuntimeError("camera.dummy_location is required for dummy cameras")

@@ -19,8 +19,8 @@ class ArchiveState(State):
     def tick(self):
         ''''''
         archive_filename = (
-            f"cam_{require(self.camera_config.get('camera'), 'camera_id') or '0'}_"
-            f"{require(self.camera_config.get('camera'), 'camera_type')}_"
+            f"cam_{require(self.camera_config, 'camera_id') or '0'}_"
+            f"{require(self.camera_config, 'camera_type')}_"
             f"{self.image.get('image_id')}_{self.timestamp}"
         )
 
@@ -29,6 +29,6 @@ class ArchiveState(State):
             require(self.archive_config, "archive_directory"),
             archive_filename,
             require(self.archive_config, "archive_parameters"),
-            require(self.camera_config.get("camera"), "camera_id"),
+            require(self.camera_config, "camera_id"),
         )
         self._return_idle()
