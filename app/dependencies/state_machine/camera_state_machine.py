@@ -20,6 +20,7 @@ class CameraSM(StateMachine):
         self.archiving = camera_config.get("archiving")
 
         super().__init__(config)
+        self.service_id = camera_config["camera"].get("camera_id")
 
 
     def __set_camera_class(self,camera_config: dict):

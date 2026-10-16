@@ -22,12 +22,12 @@ class ArchiveState(State):
             f"cam_{require(self.camera_config, 'camera_id') or '0'}_"
             f"{require(self.camera_config, 'camera_type')}_"
             f"{self.image.get('image_id')}_{self.timestamp}"
-        )
+        ).replace(":", "-").replace(" ", "-")
 
         archive_image(
             self.image.get("image"),
             require(self.archive_config, "archive_directory"),
-            archive_filename,
+            archive_filename.replace(".", "-"),
             require(self.archive_config, "archive_parameters"),
             require(self.camera_config, "camera_id"),
         )

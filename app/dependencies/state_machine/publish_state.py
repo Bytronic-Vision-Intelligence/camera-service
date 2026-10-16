@@ -49,4 +49,4 @@ class PublishState(State):
             )
             return
 
-        self.__return_idle()
+        self._return_idle()

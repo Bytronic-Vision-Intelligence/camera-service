@@ -13,8 +13,8 @@ class IdleState(State):
         then switches to the appropriate state'''
         if not self.__mqtt_watchdog():return
         message = check_for_messages(self.my_state_machine.trigger_request)
-        if not "colour_1" in message: return
-        if message.get("colour_1") == 0: return
+        if not self.my_state_machine.service_id in message: return
+        if message.get(self.my_state_machine.service_id) == 0: return
 
         if self.camera.trigger_type == "software":
             self.my_state_machine.change_state(
