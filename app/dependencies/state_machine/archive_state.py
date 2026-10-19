@@ -32,3 +32,7 @@ class ArchiveState(State):
             require(self.camera_config, "camera_id"),
         )
         self._return_idle()
+
+    def exit(self):
+        self.image = []
+        super().exit()

@@ -29,7 +29,7 @@ service:
     light_control_upper: 90
     light_control_lower: 10
     detection_sensitivity: 3
-    burst_length: 2
+    burst_length: 1
     buffer_size: 2
   trigger:
     trigger_type: software

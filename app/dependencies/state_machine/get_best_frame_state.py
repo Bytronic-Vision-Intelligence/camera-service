@@ -1,6 +1,6 @@
 from .base_functions.state import State
 from .publish_state import PublishState
-from cv2 import split, calcHist, cvtColor, COLOR_RGB2GRAY
+from cv2 import split, calcHist, cvtColor, COLOR_RGB2GRAY,imwrite
 from numpy import ndarray, mean, uint8, uint16, int32, float32, float64
 from math import inf
 class GetBestFrameState(State):
@@ -37,6 +37,10 @@ class GetBestFrameState(State):
                 self.frames[best_score[0]]
             )
         )
+
+    def exit(self):
+        self.frames = []
+        super().exit()
 
     def __histogram_mean(self,histogram):
         total = sum(histogram)

@@ -7,7 +7,10 @@ class PublishState(State):
     ''''''
     def __init__(self, state_machine,image, state_id = "Publish State"):
         super().__init__(state_machine, state_id)
-        self.image:dict = image
+        if type(image) == list:
+            self.image:dict = image[0]
+        else:
+            self.image:dict = image
         self.data = {}
 
     def enter(self):
@@ -50,3 +53,7 @@ class PublishState(State):
             return
 
         self._return_idle()
+
+    def exit(self):
+        self.image = []
+        super().exit()

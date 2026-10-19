@@ -18,7 +18,10 @@ class IdleState(State):
 
         if self.camera.trigger_type == "software":
             self.my_state_machine.change_state(
-                CaptureState(self.my_state_machine)
+                CaptureState(
+                    self.my_state_machine,
+                    []
+                )
             )
         if self.camera.trigger_type == "hardware":
             ''''''
