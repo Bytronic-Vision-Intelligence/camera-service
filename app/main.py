@@ -16,6 +16,7 @@ from dependencies import loadConfig, logging_setup
 from dependencies.CameraLibrary.cameras import Camera
 from dependencies.CameraLibrary.hardware_trigger import CameraLossError
 from dependencies.archive_functions import (
+    archive_extension,
     archive_image,
     build_archive_filename,
     filename_categories,
@@ -402,6 +403,7 @@ def publish_outputs(
                 "sku_id": sku_id,
                 "verdict": verdict,
             },
+            ext=archive_extension(variant, archive_config.get("archive_parameters")),
             when=captured_at,
         )
         archive_image(

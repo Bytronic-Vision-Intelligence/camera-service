@@ -75,7 +75,16 @@ service:
     archive_directory: ../data
     archive_parameters:
       archive_freq: daily
-      archive_storage: 50
+      # Format and size of archived 8-bit frames; 16-bit and float frames always stay PNG.
+      archive_format: png         # png | jpg
+      archive_scale: 1.0          # per side, (0, 1]; 0.5 halves width and height
+      jpeg_quality: 90
+      archive_full_res: false     # true: full-size PNG whatever format/scale say
+      # Cleanup, once a day per camera: this camera's YYYYMMDD[_hh] folders older than
+      # archive_days, then the oldest until it uses under archive_storage GB. Today's
+      # folder is never removed. off (default) | dry_run (only logs) | on
+      archive_cleanup: off
+      archive_storage: 50         # GB, this camera only
       archive_days: 30
       # true uses uuid, camera_id, camera_type, image_type, sku_id, datetime, verdict.
       # false replaces that order with filename_categories.
