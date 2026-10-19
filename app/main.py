@@ -18,8 +18,7 @@ from dependencies.CameraLibrary.hardware_trigger import CameraLossError
 from dependencies.archive_functions import (
     archive_extension,
     archive_image,
-    build_archive_filename,
-    filename_categories,
+    legacy_archive_filename,
 )
 from dependencies.image_functions import (
     apply_image_format,
@@ -319,39 +318,6 @@ def publish_outputs(
         for output, variant in prepared
         if is_archived and output["archive"]
     ]
-    categories = filename_categories(archive_config.get("archive_parameters"))
-    wants_verdict = "verdict" in categories
-    result_topic = topic_by_name(topics, "result") if wants_verdict else None
-    result_queue = None
-    if to_archive and wants_verdict and result_topic is None:
-        warning("filename_categories includes verdict but no result topic is configured")
-    if to_archive and result_topic is not None:
-        for topic in topics or []:
-            if topic.get("name") == "result":
-                result_queue = topic.get("queue")
-                break
-        if result_queue is None:
-            warning(
-                "result topic %s is not subscribed; archiving without a verdict",
-                result_topic,
-            )
-        else:
-            # Drop a verdict from the previous capture before this image is published.
-            _drain_queue(result_queue)
-
-    sku_id = None
-    if "sku_id" in categories:
-        selected = archive_config.get("selected_sku")
-        if selected is not None and str(selected).strip():
-            sku_id = str(selected).strip()
-        elif to_archive and topic_by_name(topics, "sku_update") is None:
-            warning(
-                "filename_categories includes sku_id but no sku_update topic "
-                "or selected_sku is configured"
-            )
-        elif to_archive:
-            warning("No sku selected yet; archiving without a sku")
-
     for output, variant in prepared:
         topic = build_image_topic(base_image_topic, output["topic_end"])
         image_bytes = encode_image_to_bytes(variant)
@@ -379,30 +345,13 @@ def publish_outputs(
                 exc,
             )
 
-    verdict = None
-    if to_archive and result_queue is not None:
-        timeout_s = verdict_timeout_s(archive_config)
-        info("Waiting up to %.1fs for a verdict on %s", timeout_s, result_topic)
-        verdict = wait_for_verdict(result_queue, timeout_s, stop_event)
-        if verdict == "":
-            verdict = None
-        elif verdict is None and (stop_event is None or not stop_event.is_set()):
-            warning(
-                "No verdict on %s within %.1fs; archiving without a verdict",
-                result_topic,
-                timeout_s,
-            )
-
+    # Site layout: archive_directory/YYYYMMDD/{sku}/cam_{id}/cam_{id}_{type}_{image}_{time}.png,
+    # written straight away (no waiting for a verdict).
     for output, variant in to_archive:
-        archive_filename = build_archive_filename(
-            categories,
-            {
-                "camera_id": require(camera_config, "camera_id") or "0",
-                "camera_type": require(camera_config, "camera_type"),
-                "image_type": output["id"],
-                "sku_id": sku_id,
-                "verdict": verdict,
-            },
+        archive_filename = legacy_archive_filename(
+            require(camera_config, "camera_id"),
+            require(camera_config, "camera_type"),
+            output["id"],
             ext=archive_extension(variant, archive_config.get("archive_parameters")),
             when=captured_at,
         )
@@ -412,6 +361,7 @@ def publish_outputs(
             archive_filename,
             require(archive_config, "archive_parameters"),
             require(camera_config, "camera_id"),
+            sku=archive_config.get("selected_sku"),
         )
 
 

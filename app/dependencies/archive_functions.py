@@ -208,8 +208,16 @@ def prepare_archive_image(image: np.ndarray, filename: str, archive_params: dict
     return to_save, []
 
 
-def _archive_save_dir(directory, archive_params: dict, camera_id=None) -> str | None:
-    """Build ``archive_directory/YYYYMMDD[_hh]/camera_id``. Returns None on bad input.
+def legacy_archive_filename(camera_id, camera_type, image_id, ext: str = "png",
+                            when: datetime.datetime | None = None) -> str:
+    """``cam_{id}_{camera_type}_{image_id}_{YYYYMMDD_hhmmss}.{ext}``, the name the site archive uses."""
+    when = when or datetime.datetime.now()
+    suffix = _filename_token(ext, "png").lstrip(".")
+    return f"cam_{camera_id or '0'}_{camera_type}_{image_id}_{when.strftime('%Y%m%d_%H%M%S')}.{suffix}"
+
+
+def _archive_save_dir(directory, archive_params: dict, camera_id=None, sku=None) -> str | None:
+    """Build ``archive_directory/YYYYMMDD[_hh][/sku]/cam_{id}``. Returns None on bad input.
 
     ``archive_freq`` ``daily`` uses ``YYYYMMDD``. ``hourly`` uses ``YYYYMMDD_hh``.
     """
@@ -235,8 +243,11 @@ def _archive_save_dir(directory, archive_params: dict, camera_id=None) -> str | 
     path_parts = [base_directory]
     if subfolder:
         path_parts.append(subfolder)
+    sku_folder = _filename_token(sku, "") if sku is not None else ""
+    if sku_folder:
+        path_parts.append(sku_folder)
     if camera_id is not None:
-        path_parts.append(_filename_token(camera_id, "0"))
+        path_parts.append(f"cam_{camera_id}")
     save_directory = os.path.join(*path_parts)
     os.makedirs(save_directory, exist_ok=True)
     return save_directory
@@ -455,7 +466,8 @@ def decode_raw_height_png(image: np.ndarray) -> np.ndarray:
     return mm
 
 
-def save_image_to_file(image: np.ndarray, directory: str, filename: str, archive_params: dict, camera_id=None):
+def save_image_to_file(image: np.ndarray, directory: str, filename: str, archive_params: dict, camera_id=None,
+                       sku=None):
     ''' Saves an image to a specified file directory
 
     Args:
@@ -463,7 +475,8 @@ def save_image_to_file(image: np.ndarray, directory: str, filename: str, archive
         directory: a directory location
         filename: image name including extension (.png or .jpg, see archive_extension)
         archive_params: frequency of saving, format and size, cleanup, etc.
-        camera_id: folder under the date directory
+        camera_id: optional id used as save_dir/date[/sku]/cam_{id}
+        sku: optional selected SKU folder between date and camera
     '''
     if image is None:
         logging.error("Image cannot be none")
@@ -473,7 +486,7 @@ def save_image_to_file(image: np.ndarray, directory: str, filename: str, archive
         return
 
     try:
-        save_directory = _archive_save_dir(directory, archive_params, camera_id)
+        save_directory = _archive_save_dir(directory, archive_params, camera_id, sku=sku)
         if save_directory is None:
             return
         maybe_prune_archive(directory, archive_params, camera_id)
@@ -494,7 +507,8 @@ def save_image_to_file(image: np.ndarray, directory: str, filename: str, archive
         logging.error(f"failed to write image to archive error: {e}")
 
 
-def archive_image(image: np.ndarray, directory: str, filename: str, archive_params: dict, camera_id=None):
+def archive_image(image: np.ndarray, directory: str, filename: str, archive_params: dict, camera_id=None,
+                  sku=None):
     '''starts a worker thread that will run the save_image_to_file function on a given image
 
     Args:
@@ -511,6 +525,7 @@ def archive_image(image: np.ndarray, directory: str, filename: str, archive_para
             filename,
             archive_params,
             camera_id,
+            sku,
         ),
         daemon=True
     ).start()

@@ -161,6 +161,26 @@ def test_publish_outputs_requires_archiving_keys():
         )
 
 
+def test_publish_outputs_archives_in_the_site_layout(tmp_path, monkeypatch):
+    # date/sku/cam_{id}/cam_{id}_{type}_{image}_{YYYYMMDD_hhmmss}.png, written without waiting for a verdict
+    from dependencies.archive_functions import save_image_to_file
+    monkeypatch.setattr(main, "archive_image", save_image_to_file)   # same arguments, no thread
+    client = FakeMQTTClient(FakeMQTTConfig("127.0.0.1", 1883))
+    outputs = [{"id": "default", "image_format": None, "rotate": None, "crop": None,
+                "topic_end": None, "archive": True}]
+    archive = {"is_archived": True, "archive_directory": str(tmp_path), "selected_sku": "sirloin_standard",
+               "archive_parameters": {"archive_freq": "daily"}}
+
+    main.publish_outputs(client, np.zeros((4, 4, 3), dtype=np.uint8), outputs, "dunbia/camera/colour_1/image",
+                         {"camera_id": "colour_1", "camera_type": "gige"}, archive)
+
+    (path,) = list(tmp_path.rglob("*.png"))
+    day, sku, cam, name = path.relative_to(tmp_path).parts
+    assert len(day) == 8 and day.isdigit()
+    assert (sku, cam) == ("sirloin_standard", "cam_colour_1")
+    assert name.startswith(f"cam_colour_1_gige_default_{day}_") and len(name) == len("cam_colour_1_gige_default_") + 15 + 4
+
+
 def test_main_answers_help_before_looking_for_a_config(monkeypatch):
     monkeypatch.setattr(
         main.loadConfig,
