@@ -24,9 +24,9 @@ class PublishState(State):
 
     def tick(self):
         ''''''
-        image_encoded = encode_image_to_bytes(self.image.get("image"))
         for output in self.my_state_machine.image_outputs:
             variant = apply_image_format(self.image.get("image"), output)
+            image_encoded = encode_image_to_bytes(variant)
             packet = {
                 "image": base64.b64encode(image_encoded).decode("ascii"),
                 "date_time": str(self.image.get("capture_time")),
