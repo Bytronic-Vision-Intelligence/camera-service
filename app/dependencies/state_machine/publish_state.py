@@ -3,6 +3,8 @@ from .archive_state import ArchiveState
 from ..image_functions import apply_image_format,encode_image_to_bytes,image_encoding
 import base64
 from ..CameraLibrary.cameras import Camera
+from numpy import unique, uint16, uint8, float32
+from sys import getsizeof
 class PublishState(State):
     ''''''
     def __init__(self, state_machine,image, state_id = "Publish State"):
@@ -24,16 +26,26 @@ class PublishState(State):
 
     def tick(self):
         ''''''
+        image_details = unique(self.image.get("image"))
+        print(f"image has the following values {unique(image_details)}")
         for output in self.my_state_machine.image_outputs:
-            variant = apply_image_format(self.image.get("image"), output)
-            image_encoded = encode_image_to_bytes(variant)
+            variant = self.image.get("image")
+            variant_encoded = encode_image_to_bytes(
+                variant, 
+                self.__get_type(
+                    output.get("image_format")
+                )
+            )
+
             packet = {
-                "image": base64.b64encode(image_encoded).decode("ascii"),
+                "image": base64.b64encode(variant_encoded).decode("ascii"),
                 "date_time": str(self.image.get("capture_time")),
                 "image_id": output["id"],
                 "encoding": image_encoding(variant),
             }
-        
+            packet_size = getsizeof(packet.get("image"))/(1024 * 1024)
+            print(f"Info : packet is {packet_size} MB")
+
             self.my_state_machine.mqtt_client.publish(
                 self.my_state_machine.service_output.topic,
                 packet
@@ -52,8 +64,16 @@ class PublishState(State):
             )
             return
 
-        self._return_idle()
+        self.__return_idle()
 
     def exit(self):
         self.image = []
         super().exit()
+
+    def __get_type(self, type_string:str):
+        if "uint8" in type_string:
+            return uint8
+        if "uint16" in type_string:
+            return uint16
+        if "float32" in type_string:
+            return float32

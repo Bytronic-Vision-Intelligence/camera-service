@@ -14,7 +14,7 @@ class CameraSM(StateMachine):
         )
         self.camera.connect_to_camera()
 
-        self.image_outputs = resolve_image_outputs(config)
+        self.image_outputs = resolve_image_outputs(camera_config)
         self.burst_length = require(camera_config.get("camera_settings"),"burst_length")
         self.state = self.set_idle()
         self.archiving = camera_config.get("archiving")

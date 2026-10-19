@@ -30,7 +30,7 @@ service:
     trigger_delay: 0.1
   images:
   - default:
-      image_format: null
+      image_format: uint8
       topic_end: null
       archive: true
   lights: {}
