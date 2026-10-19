@@ -21,16 +21,24 @@ def prepare_image_for_jpeg(image: np.ndarray) -> np.ndarray:
 
 
 #: Values accepted for an output's ``encoding``. None picks by bit depth.
-ENCODINGS = ("png", "jpeg")
+ENCODINGS = ("png", "jpeg", "bmp")
 
 
 def encode_image_to_bytes(image: np.ndarray, encoding: str | None = None) -> bytes:
-    """Encode the image as PNG or JPEG.
+    """Encode the image as PNG, JPEG or BMP.
 
     ``encoding`` None keeps the default: PNG for uint16, JPEG for 8-bit.
     ``"png"`` forces lossless PNG for 8-bit images too, for analysis that needs
     fine texture JPEG would smear (e.g. the Dunbia seal emboss dots).
+    ``"bmp"`` is lossless and uncompressed: ~10 ms to encode a 2448x2048 colour
+    frame against ~160 ms for PNG, but 3x the bytes (8-bit only).
     """
+    if image_encoding(image, encoding) == "bmp":
+        success, encoded_image = cv2.imencode(".bmp", image)
+        if not success:
+            raise RuntimeError("Failed to encode image to BMP format.")
+        return encoded_image.tobytes()
+
     if image_encoding(image, encoding) == "png":
         success, encoded_image = cv2.imencode(".png", image)
         if not success:

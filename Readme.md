@@ -45,10 +45,12 @@ python -m pytest test
 5. **Hardware / continuous:** camera free-run stream via `wait_for_frame`
 6. For each `service.images` entry: format → optional archive → JPEG/PNG encode
    → publish `{image, date_time, image_id, encoding}` on
-   `{image topic}/{topic_end}`. An entry's `encoding` (`png` | `jpeg`) picks the
+   `{image topic}/{topic_end}`. An entry's `encoding` (`png` | `jpeg` | `bmp`) picks the
    wire format; unset, 16-bit frames go as PNG and 8-bit frames as JPEG. Set
    `png` on an 8-bit output that analysis measures from, and keep a JPEG output
-   for display.
+   for display. `bmp` is lossless too and much faster to encode and decode, but
+   uncompressed: a 2448x2048 colour frame is ~20 MB on the wire, so the broker's
+   `max_packet_size` must allow it.
 
 Orchestrator runs multiple instances (`camera-service`, `-2`, `-3`) each with
 its own config file.

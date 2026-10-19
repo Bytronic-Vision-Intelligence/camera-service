@@ -223,6 +223,17 @@ def test_encoding_png_keeps_an_8bit_colour_frame_lossless():
     assert np.array_equal(out, img)
 
 
+def test_encoding_bmp_keeps_an_8bit_colour_frame_lossless():
+    rng = np.random.default_rng(0)
+    img = rng.integers(0, 256, (16, 16, 3), dtype=np.uint8)
+
+    data = encode_image_to_bytes(img, "bmp")
+
+    assert data[:2] == b"BM"
+    assert image_encoding(img, "bmp") == "bmp"
+    assert np.array_equal(decode_image_from_bytes(data), img)
+
+
 def test_default_encoding_is_unchanged_jpeg_for_8bit():
     rng = np.random.default_rng(0)
     img = rng.integers(0, 256, (16, 16, 3), dtype=np.uint8)
@@ -248,10 +259,11 @@ def test_parse_image_outputs_reads_encoding():
             {"rgb": {"topic_end": None}},
             {"rgb_png": {"topic_end": "png", "encoding": "PNG"}},
             {"rgb_jpeg": {"topic_end": "jpeg", "encoding": "jpeg"}},
+            {"rgb_bmp": {"topic_end": "bmp", "encoding": "bmp"}},
         ]
     )
 
-    assert [o["encoding"] for o in outputs] == [None, "png", "jpeg"]
+    assert [o["encoding"] for o in outputs] == [None, "png", "jpeg", "bmp"]
 
 
 def test_parse_image_outputs_rejects_an_unknown_encoding():
