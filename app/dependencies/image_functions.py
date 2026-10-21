@@ -20,18 +20,23 @@ def prepare_image_for_jpeg(image: np.ndarray) -> np.ndarray:
     return img
 
 
-def encode_image_to_bytes(image: np.ndarray) -> bytes:
+def encode_image_to_bytes(image: np.ndarray, encoding:type) -> bytes:
     """Encode the image as JPEG (8-bit) or PNG (uint16)."""
-    if image.dtype == np.uint16:
+    if encoding == np.uint16:
         success, encoded_image = cv2.imencode(".png", image)
         if not success:
             raise RuntimeError("Failed to encode image to PNG format.")
-        return encoded_image.tobytes()
 
-    img = prepare_image_for_jpeg(image)
-    success, encoded_image = cv2.imencode(".jpg", img)
-    if not success:
-        raise RuntimeError("Failed to encode image to JPEG format.")
+    if encoding == np.float32:
+        success, encoded_image = cv2.imencode(".tiff", image)
+        if not success:
+            raise RuntimeError("Error : failed to encode image to tiff format")
+
+    if encoding == np.uint8:
+        img = prepare_image_for_jpeg(image)
+        success, encoded_image = cv2.imencode(".jpg", img)
+        if not success:
+            raise RuntimeError("Failed to encode image to JPEG format.")
     return encoded_image.tobytes()
 
 
@@ -183,6 +188,17 @@ def _apply_mono_format(image: np.ndarray, name: str) -> np.ndarray:
 
     raise ValueError(f"Unsupported mono image_format: {name!r}")
 
+def float_to_uint8(image: np.ndarray, low: float, high: float) -> np.ndarray:
+    image = np.asarray(image, dtype=np.float32)
+    valid = np.isfinite(image)
+    result = np.zeros(image.shape, dtype=np.uint8)
+
+    if high <= low:
+        raise ValueError("high must be greater than low")
+
+    scaled = (image[valid] - low) * (255.0 / (high - low))
+    result[valid] = np.clip(scaled, 0, 255).astype(np.uint8)
+    return result
 
 def apply_image_format(image: np.ndarray, output_settings) -> np.ndarray:
     """Apply rotate, crop, then ``image_format``. ``None`` format keeps raw pixels."""

@@ -29,6 +29,7 @@ _SCMD_READY = 0x0008
 _TRG_READY = 0x0020
 _MEM_FULL = 0x0040
 
+
 # RM §7.3.1 dwNotify bits, and RM §12.2 step (5): bit 0 specifically means
 # "stop by command" -- i.e. *we* called LJS8IF_StopHighSpeedDataCommunication
 # (the only place that happens is stop_acquisition(), always part of our own
@@ -459,31 +460,36 @@ the head is triggered from its TRG terminal and ``main.py`` drains
             raise RuntimeError("LJSCamera is not connected")
 
         timeout = self.timeout_s if timeout_ms is None else float(timeout_ms) / 1000.0
+        if timeout <= 0:
+            raise ValueError(f"Error : timout must be above 0 and positive")
         deadline = time.monotonic() + timeout
-
-        status = ctypes.c_ushort()
+        
         while True:
-            res = LJSwrap.LJS8IF_GetAttentionStatus(self.device_id, status)
-            if res == 0 and (status.value & _TRG_READY):
+            status = self.get_attention_status()
+            if status & _TRG_READY:
                 break
+            
             if time.monotonic() >= deadline:
                 raise TimeoutError("LJ-S head did not report TRG_READY before timeout")
             time.sleep(0.01)
-
+            
         res = LJSwrap.LJS8IF_Trigger(self.device_id)
         if res != 0:
             # e.g. 0x80A0 if the laser isn't enabled -- see ControlLaser(1) in connect.
             raise RuntimeError(f"LJS8IF_Trigger failed: {_hex(res)}")
 
         remaining = max(deadline - time.monotonic(), 0.1)
+        
         try:
             item = self._raw_queue.get(timeout=remaining)
         except Empty:
             raise TimeoutError("Timed out waiting for LJ-S profile data") from None
+        
         if isinstance(item, _StreamStopped):
             raise RuntimeError("LJ-S high-speed data communication was stopped")
         if isinstance(item, BaseException):
             raise item
+        
         return self._decode(item)
 
     def get_attention_status(self) -> int:
@@ -494,7 +500,16 @@ the head is triggered from its TRG terminal and ``main.py`` drains
         res = LJSwrap.LJS8IF_GetAttentionStatus(self.device_id, status)
         if res != 0:
             raise RuntimeError(f"LJS8IF_GetAttentionStatus failed: {_hex(res)}")
+        
         return status.value
+
+    def decode_attention_status(self,value: int) -> list[str]:
+        flags = {
+            "_TRG_READY": _TRG_READY,
+            "_SCMD_READY": _SCMD_READY,
+            "_MEM_FULL": _MEM_FULL,
+        }
+        return [name for name, mask in flags.items() if value & mask]
 
     # -- shutdown ---------------------------------------------------------------
 
