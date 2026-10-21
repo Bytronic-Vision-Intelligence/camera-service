@@ -1,6 +1,6 @@
 from .base_functions.state import State
 from .publish_state import PublishState
-from cv2 import split, calcHist, cvtColor, COLOR_RGB2GRAY
+from cv2 import split, calcHist, cvtColor, COLOR_RGB2GRAY,imwrite
 from numpy import ndarray, mean, uint8, uint16, int32, float32, float64
 from math import inf
 class GetBestFrameState(State):
@@ -30,6 +30,11 @@ class GetBestFrameState(State):
             histogram_score.append(score)
             if score < best_score[1]:
                 best_score = [i,score]
+
+        imwrite(
+            "../data/best_frame/best_frame.png",
+            self.frames[best_score[0]]
+        )
 
         self.my_state_machine.change_state(
             PublishState(

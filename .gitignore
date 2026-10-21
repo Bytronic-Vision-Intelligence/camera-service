@@ -53,6 +53,7 @@ docs/superpowers/
 CLAUDE.md
 .DS_Store
 *dev
+*.yaml
 
 # Logs
 *.log

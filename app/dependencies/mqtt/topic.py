@@ -16,9 +16,9 @@ class Topic():
         self.thread = None
         self.timeout = details.get("timout", 10)
         if self.is_subscribe:
-            self.__create_listner()
+            self.__create_listener()
 
-    def __create_listner(self):
+    def __create_listener(self):
         '''creates a listner thread and queue'''
         self.thread = start_subscribe_thread(
             self.broker["mqtt_ip"], 

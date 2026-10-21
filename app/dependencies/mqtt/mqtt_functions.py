@@ -48,7 +48,7 @@ def subscribe_listener(ip: str, port: int, trigger_topic: str, result_queue: Que
 
     client.subscribe(trigger_topic, _on_message)
 
-def packetize_results(results:list[dict], topic:str):
+def packetise_results(results:list[dict], topic:str):
     '''splits results into packets and then wraps then appropriately for publication
     Args:
         results: a ditionary of results

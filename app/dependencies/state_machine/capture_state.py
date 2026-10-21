@@ -39,6 +39,7 @@ class CaptureState(State):
 
     def exit(self):
         sleep(self.camera.frame_pace)
+        self.images_captured = None
         return super().exit()
 
     def __next_state(self):
