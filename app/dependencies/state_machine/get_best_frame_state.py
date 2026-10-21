@@ -31,11 +31,6 @@ class GetBestFrameState(State):
             if score < best_score[1]:
                 best_score = [i,score]
 
-        imwrite(
-            "../data/best_frame/best_frame.png",
-            self.frames[best_score[0]]
-        )
-
         self.my_state_machine.change_state(
             PublishState(
                 self.my_state_machine,
