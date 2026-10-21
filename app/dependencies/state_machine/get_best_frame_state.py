@@ -43,6 +43,10 @@ class GetBestFrameState(State):
             )
         )
 
+    def exit(self):
+        self.frames = []
+        super().exit()
+
     def __histogram_mean(self,histogram):
         total = sum(histogram)
         if total == 0:
@@ -53,9 +57,11 @@ class GetBestFrameState(State):
         '''creates a histogram of an image and each channel then outputs the
         result as a dictionary of images'''
         histogram = {}
-        grey_image = cvtColor(image, COLOR_RGB2GRAY)
+        grey_image = image
+        if len(image.shape) >2:
+            grey_image = cvtColor(image, COLOR_RGB2GRAY)
         histogram["greyscale"] = calcHist([grey_image],[0],None,[256],[0,256])
-        if image.shape[2] < 1: return histogram
+        if len(image.shape) < 3: return histogram
         r,g,b = split(image)
         histogram["red"] = calcHist([r],[0],None,[256],[0,256])
         histogram["green"] = calcHist([g],[0],None,[256],[0,256])
