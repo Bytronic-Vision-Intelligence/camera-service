@@ -1,4 +1,4 @@
-broker_details:
+mqtt:
   mqtt_ip: localhost
   mqtt_port: 1883
   topics:

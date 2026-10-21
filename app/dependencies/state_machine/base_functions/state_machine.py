@@ -42,7 +42,7 @@ class StateMachine():
     @staticmethod
     def __create_mqtt_client(config:dict):
         '''creates an mqtt client object from the config'''
-        broker_details = config.get("broker_details")
+        broker_details = config.get("mqtt")
         
         mqtt_config = MQTTConfig(
             host=broker_details["mqtt_ip"], 
