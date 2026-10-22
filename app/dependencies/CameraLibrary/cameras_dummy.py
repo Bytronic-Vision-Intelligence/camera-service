@@ -43,7 +43,7 @@ class DummyCamera(Camera):
         """Return a random frame from the current frame list."""
         if not self.frame_list:
             raise RuntimeError("No dummy frames found in dummy_location")
-        return cv2.imread(self.frame_list[randint(0, len(self.frame_list) - 1)])
+        return cv2.imread(self.frame_list[randint(0, len(self.frame_list) - 1)], cv2.IMREAD_UNCHANGED)
 
     def wait_for_frame(
         self,
