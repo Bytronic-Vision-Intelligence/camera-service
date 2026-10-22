@@ -9,7 +9,7 @@ import pytest
 import yaml
 
 from dependencies import loadConfig
-from main import set_camera_class
+from dependencies.state_machine.camera_state_machine import set_camera_class
 
 CAMERA_SERVICE_ROOT = Path(__file__).resolve().parents[1]
 FIXTURE_CONFIG = Path(__file__).resolve().parent / "fixtures" / "camera_backend_configs.yaml"
@@ -124,16 +124,21 @@ def test_camera_type_connect_and_capture(camera_type, tmp_path):
         if not location.is_dir():
             pytest.skip(f"dummy_location missing: {location}")
 
+    settings = dict(camera_settings or {})
+    settings.setdefault("buffer_size", 0)
+
     camera = None
     try:
         try:
             camera = set_camera_class(
-                camera_type,
-                camera_cfg,
-                trigger_cfg,
-                camera_settings=camera_settings,
-                lights_config=lights,
+                {
+                    "camera": camera_cfg,
+                    "trigger": trigger_cfg,
+                    "camera_settings": settings,
+                    "lights": lights if isinstance(lights, dict) else {},
+                }
             )
+            camera.connect_to_camera()
         except Exception as exc:
             if camera_type in HW_TYPES:
                 pytest.skip(f"{camera_type} not available: {exc}")

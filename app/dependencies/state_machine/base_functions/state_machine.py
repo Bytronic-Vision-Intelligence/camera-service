@@ -5,7 +5,7 @@ class StateMachine():
     def __init__(self, config:dict):
         self.service_id = config.get("service_id", "camera_1")
         self.mqtt_client = self.__create_mqtt_client(config)
-        self.topics = self.__create_topic_listners(config)
+        self.topics = self.__create_topic_listeners(config)
         self.trigger_request = self.get_topic(self.topics,"trigger")
         self.service_output = self.get_topic(self.topics, "image")
         self.blocking_subscribers = self.__get_blocking_subscribers(self.topics)
@@ -27,11 +27,11 @@ class StateMachine():
         return IdleState(self)
 
     @staticmethod
-    def __create_topic_listners(config:dict):
-        '''creates a set of listners for the given topics and adds
+    def __create_topic_listeners(config:dict):
+        '''creates a set of listeners for the given topics and adds
         qeueue objects to the dictionary as well as reference to the thread
         '''
-        broker = config.get('broker_details')
+        broker = config.get('mqtt')
         topics = broker.get("topics")
         topic_list = {}
         for topic in topics:
@@ -42,7 +42,7 @@ class StateMachine():
     @staticmethod
     def __create_mqtt_client(config:dict):
         '''creates an mqtt client object from the config'''
-        broker_details = config.get("broker_details")
+        broker_details = config.get("mqtt")
         
         mqtt_config = MQTTConfig(
             host=broker_details["mqtt_ip"], 
