@@ -2,6 +2,7 @@ import os
 import logging
 import threading
 import datetime
+import uuid
 
 import numpy as np
 from cv2 import imwrite
@@ -12,9 +13,114 @@ from cv2 import imwrite
 RAW_PNG_MM_SCALE = 100.0  # 0.01 mm resolution
 BIT_SCALE_15 = 32768.0
 
+# Truncated uuid4. 4 hex chars is enough to split two saves that share
+# camera, image type, sku, and the same second. The timestamp is already
+# in the filename.
+ARCHIVE_ID_HEX_LEN = 8
+
+
+def _filename_token(value, default: str) -> str:
+    """Keep a filename field free of path separators and the ``__`` delimiter."""
+    text = str(value).strip() if value is not None else ""
+    if not text:
+        return default
+    cleaned = []
+    for ch in text:
+        if ch.isalnum() or ch in "-_":
+            cleaned.append(ch)
+        else:
+            cleaned.append("_")
+    token = "".join(cleaned).strip("_")
+    while "__" in token:
+        token = token.replace("__", "_")
+    return token or default
+
+
+# Built-in filename order. A missing value is left out.
+# ``filename_categories`` in archive_parameters replaces this list.
+FILENAME_CATEGORIES = (
+    "uuid",
+    "camera_id",
+    "camera_type",
+    "image_type",
+    "sku_id",
+    "datetime",
+    "verdict",
+)
+
+
+def filename_categories(archive_params: dict | None) -> list[str]:
+    """``filename_categories`` list from config, or ``FILENAME_CATEGORIES`` when it is missing or empty."""
+    params = archive_params or {}
+    raw = params.get("filename_categories")
+    if not isinstance(raw, list):
+        if raw is not None:
+            logging.warning(
+                "filename_categories must be a list, got %s",
+                type(raw).__name__,
+            )
+        return list(FILENAME_CATEGORIES)
+
+    names = []
+    for item in raw:
+        name = str(item).strip().lower()
+        if not name:
+            continue
+        if name not in FILENAME_CATEGORIES:
+            logging.warning("Unknown archive filename category %r", name)
+            continue
+        names.append(name)
+    return names or list(FILENAME_CATEGORIES)
+
+
+def build_archive_filename(
+    categories: list,
+    values: dict | None = None,
+    when: datetime.datetime | None = None,
+    archive_id: str | None = None,
+) -> str:
+    """Join ``categories`` with ``__``, skipping any field that has no value.
+
+    ``datetime`` is ``YYYYMMDD_hhmmss``. ``uuid`` is a 4-hex-char id when
+    ``values`` does not already supply one. The extension is added in
+    :func:`save_image_to_file`.
+    """
+    when = when or datetime.datetime.now()
+    values = values or {}
+    parts = []
+    for category in categories:
+        name = str(category).strip().lower()
+        if name not in FILENAME_CATEGORIES:
+            continue
+        token = _category_token(name, values, when, archive_id)
+        if token:
+            parts.append(token)
+    if not parts:
+        parts.append(archive_id or uuid.uuid4().hex[:ARCHIVE_ID_HEX_LEN])
+    return "__".join(parts)
+
+
+def _category_token(name: str, values: dict, when: datetime.datetime, archive_id: str | None) -> str:
+    if name == "uuid":
+        short_id = archive_id or values.get("uuid") or uuid.uuid4().hex[:ARCHIVE_ID_HEX_LEN]
+        return _filename_token(short_id, "0")
+    if name == "datetime":
+        stamp = values.get("datetime", when)
+        if isinstance(stamp, datetime.datetime):
+            return stamp.strftime("%Y%m%d_%H%M%S")
+        text = str(stamp).strip() if stamp is not None else ""
+        return text or when.strftime("%Y%m%d_%H%M%S")
+    raw = values.get(name)
+    if raw is None or not str(raw).strip():
+        return ""
+    return _filename_token(raw, "")
+
 
 def _archive_save_dir(directory, archive_params: dict, camera_id=None) -> str | None:
-    """Build dated/cam subfolder under archive_directory. Returns None on bad input."""
+    """Build ``archive_directory/YYYYMMDD[_hh]/camera_id``. Returns None on bad input.
+
+    ``archive_freq`` ``daily`` uses ``YYYYMMDD``. ``hourly`` uses ``YYYYMMDD_hh``.
+    """
     if directory == "" or directory is None:
         logging.error("no directory specified")
         return None
@@ -38,7 +144,7 @@ def _archive_save_dir(directory, archive_params: dict, camera_id=None) -> str | 
     if subfolder:
         path_parts.append(subfolder)
     if camera_id is not None:
-        path_parts.append(f"cam_{camera_id}")
+        path_parts.append(_filename_token(camera_id, "0"))
     save_directory = os.path.join(*path_parts)
     os.makedirs(save_directory, exist_ok=True)
     return save_directory
