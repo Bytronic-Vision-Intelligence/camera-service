@@ -451,7 +451,8 @@ class GigeCamera(Camera):
             self,
             camera=None,
             timeout_ms: int = 5000,
-            is_converted=True
+            is_converted=True,
+            retries = 0
             ) -> np.ndarray:
 
         #capture an image from the camera and return it as a numpy array
@@ -488,7 +489,15 @@ class GigeCamera(Camera):
                         )
         except Exception as e:
             logging.error("fetch raised an exception")
-            raise RuntimeError("Failed to grab image") from e
+            if retries < 5:
+                return self.capture_image(
+                    self,
+                    camera,
+                    timeout_ms,
+                    is_converted,
+                    retries+1
+                )
+            raise RuntimeError(f"Error: Failed to grab image after {retries}, {e}") from e
 
         if is_converted and self.pixel_format:
             if "BayerRG" in self.pixel_format:

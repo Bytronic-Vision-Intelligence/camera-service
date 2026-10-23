@@ -20,7 +20,8 @@ class IdleState(State):
             self.my_state_machine.change_state(
                 CaptureState(
                     self.my_state_machine,
-                    []
+                    images_captured=[],
+                    exposure=message.get("exposure")
                 )
             )
         if self.camera.trigger_type == "hardware":

@@ -28,6 +28,9 @@ class Camera:
         self.lights_config: dict = {}
         self.image_outputs = {}
 
+    def _set_exposure(self, camera, exposure=None):
+        pass
+
     def read_from_buffer(self, buffer:list,position:int=0):
         '''reads from the camera buffer
         Args:
