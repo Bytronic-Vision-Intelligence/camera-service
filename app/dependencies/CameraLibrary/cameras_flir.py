@@ -82,6 +82,25 @@ def _set_bool_node(nodemap, node_name: str, value: bool) -> bool:
         return False
 
 
+def _read_numeric_node(nodemap, node_name: str):
+    """Read a GenICam float or integer node. Returns None if it cannot be read."""
+    try:
+        node = nodemap.GetNode(node_name)
+        if not PySpin.IsAvailable(node) or not PySpin.IsReadable(node):
+            logger.warning("Node %s is not readable", node_name)
+            return None
+        iface = node.GetPrincipalInterfaceType()
+        if iface == PySpin.intfIFloat:
+            return float(PySpin.CFloatPtr(node).GetValue())
+        if iface == PySpin.intfIInteger:
+            return float(PySpin.CIntegerPtr(node).GetValue())
+        logger.warning("Node %s is not numeric", node_name)
+        return None
+    except Exception:
+        logger.warning("Failed reading %s", node_name, exc_info=True)
+        return None
+
+
 def _apply_pixel_format(nodemap, pixel_format: str, fallbacks) -> str:
     if _set_enum_node(nodemap, "PixelFormat", pixel_format):
         return pixel_format
@@ -104,6 +123,7 @@ class FlirCamera(Camera):
         self._trigger: SpinnakerHardwareTrigger | None = None
         self._mask_mono16_msbs = False
         self._flir_model = "a70"
+        self.planck_constants = {}
 
     def _configure_raw_pixel_format(self, nodemap) -> None:
         """Apply the GenICam setup for ``camera_settings.camera_model``.
@@ -151,12 +171,7 @@ class FlirCamera(Camera):
         # AX5 Mono16 packs a 14-bit payload with bits 14–15 stuck high.
         self._mask_mono16_msbs = pixel_format == "Mono16"
 
-        enabled = str(cfg.get("temperature_linear_mode", "false")).lower() in (
-            "true",
-            "1",
-            "yes",
-            "on",
-        )
+        enabled = cfg.get("temperature_linear_mode") is True
         # AX5 exposes this as an On/Off enum. A boolean write is rejected
         # ("not writable") and the stream stays raw signal.
         linear_entry = "On" if enabled else "Off"
@@ -177,12 +192,7 @@ class FlirCamera(Camera):
         )
         self._mask_mono16_msbs = False
 
-        enabled = str(cfg.get("temperature_linear_mode", "false")).lower() in (
-            "true",
-            "1",
-            "yes",
-            "on",
-        )
+        enabled = cfg.get("temperature_linear_mode") is True
         if not enabled:
             return
 
@@ -193,6 +203,27 @@ class FlirCamera(Camera):
         alt = ir_name.replace("10mK", " 10mK").replace("100mK", " 100mK")
         if alt != ir_name:
             _set_enum_node(nodemap, "IRFormat", alt)
+
+
+    def _read_planck_constants(self, nodemap) -> None:
+        """Read the raw-signal Planck registers. T(K) = B / ln(R / (S - O) + F)."""
+        planck_r = _read_numeric_node(nodemap, "R")
+        planck_b = _read_numeric_node(nodemap, "B")
+        planck_f = _read_numeric_node(nodemap, "F")
+        planck_o = _read_numeric_node(nodemap, "O")
+        self.planck_constants = {"planck_r":planck_r,
+                                 "planck_b":planck_b,
+                                 "planck_f":planck_f,
+                                 "planck_o":planck_o, 
+                                }
+        logger.info(
+            "Planck constants R=%s B=%s F=%s O=%s",
+            planck_r,
+            planck_b,
+            planck_f,
+            planck_o,
+        )
+
 
     def _find_camera(self):
         self.cam = None
@@ -258,6 +289,7 @@ class FlirCamera(Camera):
                     acquisition_mode.SetIntValue(continuous.GetValue())
 
             self._configure_raw_pixel_format(nodemap)
+            self._read_planck_constants(nodemap)
 
             trigger_cfg = HardwareTriggerConfig.from_app_config(self.trigger_config)
             self._trigger = SpinnakerHardwareTrigger(self.cam, trigger_cfg)

@@ -88,7 +88,7 @@ def test_a70_configure_does_not_write_ax5_nodes(monkeypatch):
     camera = FlirCamera()
     camera.camera_settings = {
         "camera_model": "A70",
-        "temperature_linear_mode": "true",
+        "temperature_linear_mode": True,
         "pixel_format": "Mono16",
     }
 

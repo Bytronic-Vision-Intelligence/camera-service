@@ -24,6 +24,12 @@ class PublishState(State):
         super().enter()
         camera:Camera = self.my_state_machine.camera
         self.trigger_config = camera.trigger_config
+        self.camera_config = camera.camera_config
+        self.camera_settings = camera.camera_settings
+        if self.camera_config.get("camera_type").lower() == "flir":
+            self.planck_constants = camera.planck_constants
+        elif self.camera_settings.get("planck_constants"):
+            self.planck_constants = self.camera_settings.get("planck_constants")
         self.is_archived = self.my_state_machine.archiving.get("is_archived")
         if not self.my_state_machine.mqtt_client.is_connected:
             self.my_state_machine.mqtt_client.connect()
@@ -32,6 +38,9 @@ class PublishState(State):
     def tick(self):
         ''''''
         image_details = unique(self.image.get("image"))
+        camera_details = {**self.camera_config, **self.camera_settings}
+        if self.planck_constants:
+            camera_details["planck_constants"] = self.planck_constants
         print(f"image has the following values {unique(image_details)}")
         for output in self.my_state_machine.image_outputs:
             variant = apply_image_format(self.image.get("image"), output)
@@ -45,6 +54,7 @@ class PublishState(State):
                 "date_time": str(self.image.get("capture_time")),
                 "image_id": output["id"],
                 "encoding": image_encoding(variant),
+                "camera_details": camera_details
             }
             packet_size = getsizeof(packet.get("image"))/(1024 * 1024)
             print(f"Info : packet is {packet_size} MB")
