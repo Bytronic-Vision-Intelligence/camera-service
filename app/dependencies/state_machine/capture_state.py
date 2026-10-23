@@ -43,7 +43,7 @@ class CaptureState(State):
         )
 
     def exit(self):
-        sleep(self.camera.frame_pace)
+        sleep(self.camera.frame_pace*2)
         self.images_captured = []
         return super().exit()
 
@@ -51,7 +51,7 @@ class CaptureState(State):
         exposure = self.exposure
         if type(exposure) == list:
             exposure = exposure[len(self.images_captured)]
-        self.camera._set_exposure(self.camera, exposure)
+        self.camera._set_exposure(self.camera.cam, exposure*1000)
 
     def __next_state(self):
         if self.my_state_machine.burst_length ==1:
