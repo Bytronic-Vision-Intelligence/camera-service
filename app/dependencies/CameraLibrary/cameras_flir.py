@@ -17,6 +17,37 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
+# AX5 and A70 do not share radiometric nodes. AX5 uses CMOSBitDepth, an On/Off
+# TemperatureLinearMode enum, and TemperatureLinearResolution. A70 uses Mono16
+# plus IRFormat, and its Mono16 values must be left intact.
+_FLIR_MODEL_PROFILES = {
+    "a70": {
+        "default_pixel_format": "Mono16",
+        "pixel_format_fallbacks": ("Mono16", "Mono8"),
+        "set_cmos_bit_depth": False,
+        "mask_mono16_msbs": False,
+        "temperature_linear_ir_format": "TemperatureLinear10mK",
+    },
+    "ax5": {
+        "default_pixel_format": "Mono14",
+        "pixel_format_fallbacks": ("Mono14", "Mono16", "Mono8"),
+        "set_cmos_bit_depth": True,
+        "default_cmos_bit_depth": "bit14bit",
+        "mask_mono16_msbs": True,
+        "default_temperature_linear_resolution": "High",
+    },
+}
+
+def flir_model_profile(camera_model) -> dict:
+    """Return the GenICam profile for ``camera_model`` (``a70`` or ``ax5``)."""
+    model = str(camera_model or "ax5").strip().lower()
+    try:
+        return dict(_FLIR_MODEL_PROFILES[model])
+    except KeyError as exc:
+        raise ValueError(
+            f"Unsupported FLIR camera_model={camera_model!r}; expected one of: a70, ax5"
+        ) from exc
+
 
 def _set_enum_node(nodemap, node_name: str, entry_name: str) -> bool:
     """Set a GenICam enumeration node if available/writable. Returns True on success."""
@@ -51,6 +82,17 @@ def _set_bool_node(nodemap, node_name: str, value: bool) -> bool:
         return False
 
 
+def _apply_pixel_format(nodemap, pixel_format: str, fallbacks) -> str:
+    if _set_enum_node(nodemap, "PixelFormat", pixel_format):
+        return pixel_format
+    for fallback in fallbacks:
+        if fallback == pixel_format:
+            continue
+        if _set_enum_node(nodemap, "PixelFormat", fallback):
+            return fallback
+    return pixel_format
+
+
 class FlirCamera(Camera):
     def __init__(self):
         super().__init__()
@@ -61,51 +103,96 @@ class FlirCamera(Camera):
         self.pixel_format_out = None
         self._trigger: SpinnakerHardwareTrigger | None = None
         self._mask_mono16_msbs = False
+        self._flir_model = "a70"
 
     def _configure_raw_pixel_format(self, nodemap) -> None:
-        """AX5 defaults to 8-bit; switch to 14-bit raw so values are not 0–255.
+        """Apply the GenICam setup for ``camera_settings.camera_model``.
 
-        Preferred: PixelFormat=Mono14, CMOSBitDepth=bit14bit.
-        Mono16 is accepted but bits 14–15 must be masked (always 1 on AX5).
+        Missing ``camera_model`` stays on the AX5 path. ``a70`` never writes
+        AX5 nodes, and ``ax5`` never writes ``IRFormat``.
         """
         try:
             cfg = self.camera_settings or {}
-            pixel_format = str(cfg.get("pixel_format", "Mono14"))
-            cmos_depth = str(cfg.get("cmos_bit_depth", "bit14bit"))
-            temp_linear = str(cfg.get("temperature_linear_mode", "false")).lower()
         except Exception:
-            pixel_format = "Mono14"
-            cmos_depth = "bit14bit"
-            temp_linear = "false"
+            cfg = {}
+        if not isinstance(cfg, dict):
+            cfg = {}
 
+        model = str(cfg.get("camera_model") or "ax5").strip().lower()
+        try:
+            profile = flir_model_profile(model)
+        except ValueError:
+            logger.warning(
+                "Invalid FLIR camera_model=%r; falling back to ax5",
+                cfg.get("camera_model"),
+            )
+            model = "ax5"
+            profile = flir_model_profile(model)
+        self._flir_model = model
+        logger.info("Configuring FLIR model=%s", model)
+
+        if model == "a70":
+            self._configure_a70(nodemap, cfg, profile)
+        else:
+            self._configure_ax5(nodemap, cfg, profile)
+
+    def _configure_ax5(self, nodemap, cfg: dict, profile: dict) -> None:
+        cmos_depth = str(
+            cfg.get("cmos_bit_depth") or profile["default_cmos_bit_depth"]
+        )
         # CMOS bit depth must match PixelFormat when switching 8 <-> 14 bit.
         _set_enum_node(nodemap, "CMOSBitDepth", cmos_depth)
 
-        if not _set_enum_node(nodemap, "PixelFormat", pixel_format):
-            # Fallbacks if preferred format is missing on this firmware
-            for fallback in ("Mono14", "Mono16", "Mono8"):
-                if fallback == pixel_format:
-                    continue
-                if _set_enum_node(nodemap, "PixelFormat", fallback):
-                    pixel_format = fallback
-                    break
-
+        pixel_format = _apply_pixel_format(
+            nodemap,
+            str(cfg.get("pixel_format") or profile["default_pixel_format"]),
+            profile["pixel_format_fallbacks"],
+        )
+        # AX5 Mono16 packs a 14-bit payload with bits 14–15 stuck high.
         self._mask_mono16_msbs = pixel_format == "Mono16"
 
-        if temp_linear in ("true", "1", "yes", "on"):
-            _set_bool_node(nodemap, "TemperatureLinearMode", True)
+        enabled = str(cfg.get("temperature_linear_mode", "false")).lower() in (
+            "true",
+            "1",
+            "yes",
+            "on",
+        )
+        # AX5 exposes this as an On/Off enum. A boolean write is rejected
+        # ("not writable") and the stream stays raw signal.
+        linear_entry = "On" if enabled else "Off"
+        if not _set_enum_node(nodemap, "TemperatureLinearMode", linear_entry):
+            _set_bool_node(nodemap, "TemperatureLinearMode", enabled)
 
-        try:
-            pf = PySpin.CEnumerationPtr(nodemap.GetNode("PixelFormat"))
-            if PySpin.IsAvailable(pf) and PySpin.IsReadable(pf):
-                cur = PySpin.CEnumEntryPtr(pf.GetCurrentEntry())
-                if PySpin.IsAvailable(cur) and PySpin.IsReadable(cur):
-                    logger.info("Active PixelFormat: %s", cur.GetSymbolic())
-        except Exception:
-            logger.debug(
-                "Unable to read/log active PixelFormat; continuing initialization",
-                exc_info=True,
-            )
+        resolution = str(
+            cfg.get("temperature_linear_resolution")
+            or profile["default_temperature_linear_resolution"]
+        )
+        _set_enum_node(nodemap, "TemperatureLinearResolution", resolution)
+
+    def _configure_a70(self, nodemap, cfg: dict, profile: dict) -> None:
+        _apply_pixel_format(
+            nodemap,
+            str(cfg.get("pixel_format") or profile["default_pixel_format"]),
+            profile["pixel_format_fallbacks"],
+        )
+        self._mask_mono16_msbs = False
+
+        enabled = str(cfg.get("temperature_linear_mode", "false")).lower() in (
+            "true",
+            "1",
+            "yes",
+            "on",
+        )
+        if not enabled:
+            return
+
+        ir_name = str(cfg.get("ir_format") or profile["temperature_linear_ir_format"])
+        if _set_enum_node(nodemap, "IRFormat", ir_name):
+            return
+        # Some firmwares use a spaced symbolic name.
+        alt = ir_name.replace("10mK", " 10mK").replace("100mK", " 100mK")
+        if alt != ir_name:
+            _set_enum_node(nodemap, "IRFormat", alt)
 
     def _find_camera(self):
         self.cam = None
@@ -243,7 +330,7 @@ class FlirCamera(Camera):
                 # Native sensor buffer (Mono14/Mono16 → HxW uint16), not BGR8.
                 img = grab_result.GetNDArray()
                 if self._mask_mono16_msbs and getattr(img, "dtype", None) == np.uint16:
-                    # AX5 Mono16: bits 14–15 are always 1; keep 14-bit payload.
+                    # AX5 Mono16 only: bits 14–15 are always 1; keep the 14-bit payload.
                     img = np.asarray(img) & np.uint16(0x3FFF)
 
             logging.info(
