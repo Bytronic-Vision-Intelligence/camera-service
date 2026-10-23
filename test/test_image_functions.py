@@ -47,7 +47,7 @@ def test_prepare_image_rejects_none_and_non_arrays():
 def test_encode_decode_round_trip_preserves_shape():
     img = np.arange(64, dtype=np.uint8).reshape(8, 8)
 
-    out = decode_image_from_bytes(encode_image_to_bytes(img))
+    out = decode_image_from_bytes(encode_image_to_bytes(img, np.uint8))
 
     assert out.shape == img.shape
     assert out.dtype == np.uint8
@@ -189,7 +189,7 @@ def test_encode_uint16_round_trip_as_png():
         {"image_format": "Mono14"},
     )
 
-    out = decode_image_from_bytes(encode_image_to_bytes(img))
+    out = decode_image_from_bytes(encode_image_to_bytes(img, np.uint16))
 
     assert out.dtype == np.uint16
     assert np.array_equal(out, img)

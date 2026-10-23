@@ -1,6 +1,11 @@
 from .base_functions.state import State
 from .archive_state import ArchiveState
-from ..image_functions import apply_image_format,encode_image_to_bytes,image_encoding
+from ..image_functions import (
+    apply_image_format,
+    build_image_topic,
+    encode_image_to_bytes,
+    image_encoding,
+)
 import base64
 from ..CameraLibrary.cameras import Camera
 from numpy import unique, uint16, uint8, float32
@@ -29,12 +34,10 @@ class PublishState(State):
         image_details = unique(self.image.get("image"))
         print(f"image has the following values {unique(image_details)}")
         for output in self.my_state_machine.image_outputs:
-            variant = self.image.get("image")
+            variant = apply_image_format(self.image.get("image"), output)
             variant_encoded = encode_image_to_bytes(
-                variant, 
-                self.__get_type(
-                    output.get("image_format")
-                )
+                variant,
+                self.__get_type(output.get("image_format")),
             )
 
             packet = {
@@ -46,10 +49,11 @@ class PublishState(State):
             packet_size = getsizeof(packet.get("image"))/(1024 * 1024)
             print(f"Info : packet is {packet_size} MB")
 
-            self.my_state_machine.mqtt_client.publish(
+            topic = build_image_topic(
                 self.my_state_machine.service_output.topic,
-                packet
+                output.get("topic_end"),
             )
+            self.my_state_machine.mqtt_client.publish(topic, packet)
 
         if self.is_archived:
             self.my_state_machine.change_state(
@@ -70,10 +74,10 @@ class PublishState(State):
         self.image = []
         super().exit()
 
-    def __get_type(self, type_string:str):
-        if "uint8" in type_string:
+    def __get_type(self, type_string: str | dict | None):
+        if type_string is None or "uint8" in type_string or "colourmap" in type_string:
             return uint8
-        if "uint16" in type_string:
+        if "uint16" in type_string or "Mono" in type_string or "mono" in type_string:
             return uint16
         if "float32" in type_string:
             return float32
