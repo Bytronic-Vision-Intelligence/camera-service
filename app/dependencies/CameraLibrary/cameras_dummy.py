@@ -11,13 +11,17 @@ import os
 class DummyCamera(Camera):
     """A camera class used for testing with images from a file, not using any real camera.
 
-    Reads ``dummy_location`` / ``file_type`` from ``self.camera_config`` after
-    ``main.set_camera_class`` injects the service camera section.
+    Reads ``dummy_location`` / ``file_type`` / ``in_order`` from
+    ``self.camera_config`` after ``main.set_camera_class`` injects the service
+    camera section. ``in_order: true`` walks the sorted file list and wraps;
+    otherwise each capture picks a file at random.
     """
 
     def __init__(self):
         super().__init__()
         self.frame_list = []
+        self.in_order = False
+        self._frame_index = 0
 
     def connect_to_camera(self):
         config = self.camera_config
@@ -27,6 +31,8 @@ class DummyCamera(Camera):
         extension = str(config.get("file_type") or ".png")
         if not extension.startswith("."):
             extension = f".{extension}"
+        self.in_order = bool(config.get("in_order"))
+        self._frame_index = 0
         self._get_frame_list(Path(directory), extension)
 
     def _get_frame_list(self, directory_path: Path, extension: str = ".png"):
@@ -38,12 +44,21 @@ class DummyCamera(Camera):
                     self.frame_list.append(os.path.join(root, file))
         if not self.frame_list:
             raise RuntimeError(f"No dummy frames found in {directory_path}")
+        if self.in_order:
+            self.frame_list.sort()
+
+    def _next_frame_path(self) -> str:
+        if self.in_order:
+            path = self.frame_list[self._frame_index]
+            self._frame_index = (self._frame_index + 1) % len(self.frame_list)
+            return path
+        return self.frame_list[randint(0, len(self.frame_list) - 1)]
 
     def capture_image(self, timeout_ms=0):
-        """Return a random frame from the current frame list."""
+        """Return the next frame, in order when ``in_order`` is set."""
         if not self.frame_list:
             raise RuntimeError("No dummy frames found in dummy_location")
-        return cv2.imread(self.frame_list[randint(0, len(self.frame_list) - 1)], cv2.IMREAD_UNCHANGED)
+        return cv2.imread(self._next_frame_path(), cv2.IMREAD_UNCHANGED)
 
     def wait_for_frame(
         self,
