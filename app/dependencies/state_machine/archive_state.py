@@ -1,6 +1,6 @@
 from .base_functions.state import State
 from ..loadConfig import require
-from ..archive_functions import archive_image
+from ..archive_functions import archive_image, build_archive_filename, filename_categories
 from ..CameraLibrary.cameras import Camera
 
 class ArchiveState(State):
@@ -18,17 +18,24 @@ class ArchiveState(State):
 
     def tick(self):
         ''''''
-        archive_filename = (
-            f"cam_{require(self.camera_config, 'camera_id') or '0'}_"
-            f"{require(self.camera_config, 'camera_type')}_"
-            f"{self.image.get('image_id')}_{self.timestamp}"
-        ).replace(":", "-").replace(" ", "-")
+        archive_params = require(self.archive_config, "archive_parameters")
+        archive_filename = build_archive_filename(
+            filename_categories(archive_params),
+            values={
+                "camera_id": require(self.camera_config, "camera_id"),
+                "camera_type": require(self.camera_config, "camera_type"),
+                "image_type": self.image.get("image_id"),
+                "sku_id": self.image.get("sku_id"),
+                "datetime": self.timestamp,
+                "verdict": self.image.get("verdict"),
+            },
+        )
 
         archive_image(
             self.image.get("image"),
             require(self.archive_config, "archive_directory"),
-            archive_filename.replace(".", "-"),
-            require(self.archive_config, "archive_parameters"),
+            archive_filename,
+            archive_params,
             require(self.camera_config, "camera_id"),
         )
         self._return_idle()
