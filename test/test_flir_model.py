@@ -2,10 +2,18 @@
 
 from __future__ import annotations
 
+import importlib.util
+import sys
+import types
+
 import pytest
 
-from dependencies.CameraLibrary import cameras_flir
-from dependencies.CameraLibrary.cameras_flir import FlirCamera, flir_model_profile
+# PySpin ships only as a Windows Spinnaker wheel and is not installed in CI.
+if importlib.util.find_spec("PySpin") is None:
+    sys.modules["PySpin"] = types.ModuleType("PySpin")
+
+from dependencies.CameraLibrary import cameras_flir  # noqa: E402
+from dependencies.CameraLibrary.cameras_flir import FlirCamera, flir_model_profile  # noqa: E402
 
 
 def _record_enum_writes(monkeypatch):
