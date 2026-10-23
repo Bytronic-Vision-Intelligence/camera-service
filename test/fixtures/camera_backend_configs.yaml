@@ -57,10 +57,12 @@ camera_types:
     serial_number: "89901703"
     capture_timeout: 10
     camera_settings:
+      camera_model: ax5
       buffer_size: 0
       pixel_format: Mono14
       cmos_bit_depth: bit14bit
       temperature_linear_mode: true
+      temperature_linear_resolution: High
 
   pylon:
     camera_type: pylon
