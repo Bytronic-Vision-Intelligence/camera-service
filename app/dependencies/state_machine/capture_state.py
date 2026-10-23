@@ -10,11 +10,13 @@ class CaptureState(State):
             state_machine,
             images_captured:list=[],
             burst_length:int = 1, 
+            exposure:any = None,
             state_id = "Capture State"
         ):
         super().__init__(state_machine, state_id)
         self.images_captured = images_captured
         self.burst_length = burst_length
+        self.exposure = exposure
     
     def enter(self):
         self.camera:Camera = self.my_state_machine.camera
@@ -22,6 +24,9 @@ class CaptureState(State):
 
     def tick(self):
         ''''''
+        if self.exposure != None:
+            self.__set_exposure(self.exposure)
+
         image = self.__get_image(self.camera)
         self.images_captured.append(image)
 
@@ -41,6 +46,12 @@ class CaptureState(State):
         sleep(self.camera.frame_pace)
         self.images_captured = []
         return super().exit()
+
+    def __set_exposure(self, exposure):
+        exposure = self.exposure
+        if type(exposure) == list:
+            exposure = exposure[len(self.images_captured)]
+        self.camera._set_exposure(self.camera, exposure)
 
     def __next_state(self):
         if self.my_state_machine.burst_length ==1:
