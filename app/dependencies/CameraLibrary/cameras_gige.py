@@ -497,7 +497,7 @@ class GigeCamera(Camera):
                     is_converted,
                     retries+1
                 )
-            raise RuntimeError("Failed to grab image") from e
+            raise RuntimeError(f"Error: Failed to grab image after {retries}, {e}") from e
 
         if is_converted and self.pixel_format:
             if "BayerRG" in self.pixel_format:
