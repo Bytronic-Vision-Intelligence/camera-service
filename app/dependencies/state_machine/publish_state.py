@@ -47,7 +47,7 @@ class PublishState(State):
             variant = apply_image_format(self.image.get("image"), output)
             variant_encoded = encode_image_to_bytes(
                 variant,
-                self.__get_type(output.get("image_type"), variant),
+                self.__get_type(output.get("image_type")),
             )
 
             packet = {
