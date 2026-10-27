@@ -8,3 +8,6 @@
 save_dir/
 persist.json
 CLAUDE.md
+*.bmp
+*.yaml
+*.vscode
