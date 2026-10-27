@@ -25,10 +25,11 @@ service:
   camera:
     camera_type: dummy
     camera_id: "0001"
-    # Both required for camera_type: dummy. A frame is chosen at random from
-    # the files under dummy_location matching file_type.
+    # dummy_location and file_type are required. Frames are chosen at random
+    # unless in_order is true, which walks the sorted file list and wraps.
     dummy_location: "./test"
     file_type: ".png"
+    # in_order: true
     # Ignored: the dummy reads from disk.
     capture_timeout: 5000
 
