@@ -1,6 +1,7 @@
 import numpy as np
 import pytest
 
+import dependencies.image_functions as image_functions
 from dependencies.image_functions import (
     apply_image_format,
     build_image_topic,
@@ -9,6 +10,7 @@ from dependencies.image_functions import (
     encode_image_to_bytes,
     image_encoding,
     parse_image_outputs,
+    _resize_img,
     prepare_image_for_jpeg,
     resolve_image_outputs,
 )
@@ -73,7 +75,14 @@ def test_encode_date_time_is_utf8_and_parseable():
 def test_parse_image_outputs_reads_ids_and_flags():
     outputs = parse_image_outputs(
         [
-            {"raw": {"image_format": "Mono14", "topic_end": "raw", "archive": True}},
+            {
+                "raw": {
+                    "image_type": "uint16",
+                    "image_format": "Mono14",
+                    "topic_end": "raw",
+                    "archive": True,
+                }
+            },
             {
                 "colourmap": {
                     "image_format": {"colourmap": "JET"},
@@ -94,9 +103,11 @@ def test_parse_image_outputs_reads_ids_and_flags():
     )
 
     assert outputs[0]["id"] == "raw"
+    assert outputs[0]["image_type"] == "uint16"
     assert outputs[0]["archive"] is True
     assert outputs[0]["rotate"] is None
     assert outputs[0]["crop"] is None
+    assert outputs[1]["image_type"] is None
     assert outputs[1]["topic_end"] == "colourmap"
     assert outputs[2]["rotate"] == -90
     assert outputs[2]["crop"] == [{"x": [0.15, 0.85]}]
@@ -164,6 +175,47 @@ def test_apply_image_format_uint16_keeps_full_range():
     assert out[0, 1] == 65535
 
 
+def test_resize_img_scales_both_axes():
+    img = np.arange(100, dtype=np.uint8).reshape(10, 10)
+
+    out = _resize_img(img, 0.5)
+
+    assert out.shape == (5, 5)
+    assert out.dtype == np.uint8
+
+
+def test_resize_img_accepts_explicit_width_and_height():
+    img = np.zeros((8, 16), dtype=np.uint16)
+
+    out = _resize_img(img, [4, 2])
+
+    assert out.shape == (2, 4)
+    assert out.dtype == np.uint16
+
+
+def test_encode_shrinks_image_to_max_size(monkeypatch):
+    monkeypatch.setattr(image_functions, "MAX_IMG_SIZE", 8_000)
+    img = np.random.default_rng(0).integers(0, 256, size=(320, 320, 3), dtype=np.uint8)
+
+    encoded = encode_image_to_bytes(img, np.uint8)
+    decoded = decode_image_from_bytes(encoded)
+
+    assert len(encoded) <= 8_000
+    assert decoded.shape[0] < img.shape[0]
+    assert decoded.shape[1] < img.shape[1]
+
+
+def test_apply_image_format_resizes_after_crop():
+    img = np.arange(100, dtype=np.uint8).reshape(10, 10)
+
+    out = apply_image_format(
+        img,
+        {"crop": [{"x": [0.2, 0.8]}], "resize": 0.5},
+    )
+
+    assert out.shape == (5, 3)
+
+
 def test_apply_image_format_rotate_and_crop():
     # Distinct pixel so rotate/crop orientation is easy to check.
     img = np.arange(100, dtype=np.uint8).reshape(10, 10)
@@ -181,6 +233,26 @@ def test_apply_image_format_rotate_and_crop():
         {"rotate": 90, "crop": [{"y": [0.0, 0.5]}]},
     )
     assert both.shape == (5, 10)
+
+
+def test_encode_uses_array_dtype_when_encoding_is_missing():
+    raw = np.array([[0, 16383], [100, 200]], dtype=np.uint16)
+    colour = np.zeros((4, 4, 3), dtype=np.uint8)
+
+    raw_out = decode_image_from_bytes(encode_image_to_bytes(raw, None))
+    colour_out = decode_image_from_bytes(encode_image_to_bytes(colour))
+
+    assert raw_out.dtype == np.uint16
+    assert np.array_equal(raw_out, raw)
+    assert colour_out.dtype == np.uint8
+    assert colour_out.shape == colour.shape
+
+
+def test_encode_rejects_unknown_encoding():
+    img = np.zeros((2, 2), dtype=np.uint8)
+
+    with pytest.raises(ValueError, match="Unsupported image encoding"):
+        encode_image_to_bytes(img, np.int32)
 
 
 def test_encode_uint16_round_trip_as_png():
@@ -208,3 +280,4 @@ def test_resolve_image_outputs_defaults_without_images_key():
     assert outputs[0]["id"] == "default"
     assert outputs[0]["rotate"] is None
     assert outputs[0]["crop"] is None
+    assert outputs[0]["resize"] is None

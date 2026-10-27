@@ -26,17 +26,17 @@ def encode_image_to_bytes(image: np.ndarray, encoding:type) -> bytes:
         success, encoded_image = cv2.imencode(".png", image)
         if not success:
             raise RuntimeError("Failed to encode image to PNG format.")
-
-    if encoding == np.float32:
+    elif encoding == np.float32:
         success, encoded_image = cv2.imencode(".tiff", image)
         if not success:
             raise RuntimeError("Error : failed to encode image to tiff format")
-
-    if encoding == np.uint8:
+    elif encoding == np.uint8:
         img = prepare_image_for_jpeg(image)
         success, encoded_image = cv2.imencode(".jpg", img)
         if not success:
             raise RuntimeError("Failed to encode image to JPEG format.")
+    else:
+        raise ValueError(f"Unsupported image encoding: {encoding!r}")
     return encoded_image.tobytes()
 
 
@@ -87,6 +87,24 @@ def _apply_crop(image: np.ndarray, crop) -> np.ndarray:
         elif axis == "y":
             y0, y1 = int(start * h), int(end * h)
     return image[y0:y1, x0:x1]
+
+
+def _resize_img(image: np.ndarray, resize) -> np.ndarray:
+    """Shrink by a scale factor or an explicit ``[width, height]`` in pixels."""
+    height, width = image.shape[:2]
+    if isinstance(resize, (int, float)) and not isinstance(resize, bool):
+        scale = float(resize)
+        if not np.isfinite(scale) or scale <= 0 or scale >= 1:
+            raise ValueError(f"resize scale must be between 0 and 1, got {resize!r}")
+        new_width = round(width * scale)
+        new_height = round(height * scale)
+    elif isinstance(resize, (list, tuple)) and len(resize) == 2:
+        new_width, new_height = int(resize[0]), int(resize[1])
+    else:
+        raise ValueError(
+            f"resize must be a scale factor or [width, height], got {resize!r}"
+        )
+    return cv2.resize(image, (new_width, new_height), interpolation=cv2.INTER_AREA)
 
 
 def _color_conversion_code(name: str) -> int:
@@ -201,7 +219,7 @@ def float_to_uint8(image: np.ndarray, low: float, high: float) -> np.ndarray:
     return result
 
 def apply_image_format(image: np.ndarray, output_settings) -> np.ndarray:
-    """Apply rotate, crop, then ``image_format``. ``None`` format keeps raw pixels."""
+    """Apply rotate, crop, resize, then ``image_format``. ``None`` format keeps raw pixels."""
     if not isinstance(output_settings, dict):
         raise ValueError("output_settings must be a mapping")
 
@@ -210,6 +228,9 @@ def apply_image_format(image: np.ndarray, output_settings) -> np.ndarray:
 
     if output_settings.get("crop") is not None:
         image = _apply_crop(image, output_settings["crop"])
+
+    if output_settings.get("resize") is not None:
+        image = _resize_img(image, output_settings["resize"])
 
     image_format = output_settings.get("image_format")
     if image_format is None:
@@ -266,9 +287,11 @@ def parse_image_outputs(images_config) -> list[dict]:
         outputs.append(
             {
                 "id": str(image_id),
+                "image_type": spec.get("image_type"),
                 "image_format": spec.get("image_format"),
                 "rotate": spec.get("rotate"),
                 "crop": spec.get("crop"),
+                "resize": spec.get("resize"),
                 "topic_end": spec.get("topic_end"),
                 "archive": bool(spec.get("archive", False)),
             }
@@ -283,9 +306,11 @@ def resolve_image_outputs(config: dict) -> list[dict]:
     return [
         {
             "id": "default",
+            "image_type": None,
             "image_format": None,
             "rotate": None,
             "crop": None,
+            "resize": None,
             "topic_end": None,
             "archive": True,
         }
