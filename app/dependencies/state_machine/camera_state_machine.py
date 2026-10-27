@@ -36,6 +36,9 @@ def set_camera_class(camera_config: dict):
     elif camera_type == "ljs":
         from dependencies.CameraLibrary.cameras_ljs import LJSCamera
         camera = LJSCamera()
+    elif camera_type == "gocator":
+        from dependencies.CameraLibrary.cameras_gocator import GocatorCamera
+        camera = GocatorCamera()
     else:
         raise ValueError(f"Unsupported camera type: {camera_type}")
 
