@@ -26,6 +26,7 @@ class PublishState(State):
         self.trigger_config = camera.trigger_config
         self.camera_config = camera.camera_config
         self.camera_settings = camera.camera_settings
+        self.planck_constants = None # A safety to set default to None.
         if self.camera_config.get("camera_type").lower() == "flir":
             self.planck_constants = camera.planck_constants
         elif self.camera_settings.get("planck_constants"):
