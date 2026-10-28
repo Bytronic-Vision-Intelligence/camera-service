@@ -85,7 +85,9 @@ class PublishState(State):
         self.image = []
         super().exit()
 
-    def __get_type(self, type_string: str):
+    def __get_type(self, type_string: str | None):
+        if type_string is None:
+            return None     # encode by the image's own dtype
         if "uint8" in type_string:
             return uint8
         if "uint16" in type_string:

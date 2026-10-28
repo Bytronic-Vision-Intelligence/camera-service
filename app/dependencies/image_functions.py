@@ -2,6 +2,9 @@ import numpy as np
 import cv2
 from time import localtime, strftime
 
+#: JPEG byte limit; larger images are scaled down until they fit. None = no limit.
+MAX_IMG_SIZE: int | None = None
+
 
 def prepare_image_for_jpeg(image: np.ndarray) -> np.ndarray:
     """Return an 8-bit image suitable for JPEG (keeps mono HxW raw layout)."""
@@ -20,8 +23,11 @@ def prepare_image_for_jpeg(image: np.ndarray) -> np.ndarray:
     return img
 
 
-def encode_image_to_bytes(image: np.ndarray, encoding:type) -> bytes:
-    """Encode the image as JPEG (8-bit) or PNG (uint16)."""
+def encode_image_to_bytes(image: np.ndarray, encoding: type | None = None) -> bytes:
+    """Encode the image as JPEG (8-bit), PNG (uint16) or TIFF (float32).
+    ``encoding`` None follows the array's dtype (uint16 / float32, else JPEG)."""
+    if encoding is None:
+        encoding = image.dtype.type if image.dtype in (np.uint16, np.float32) else np.uint8
     if encoding == np.uint16:
         success, encoded_image = cv2.imencode(".png", image)
         if not success:
@@ -35,6 +41,11 @@ def encode_image_to_bytes(image: np.ndarray, encoding:type) -> bytes:
         success, encoded_image = cv2.imencode(".jpg", img)
         if not success:
             raise RuntimeError("Failed to encode image to JPEG format.")
+        while MAX_IMG_SIZE and encoded_image.size > MAX_IMG_SIZE and min(img.shape[:2]) > 1:
+            img = cv2.resize(img, None, fx=0.75, fy=0.75, interpolation=cv2.INTER_AREA)
+            success, encoded_image = cv2.imencode(".jpg", img)
+            if not success:
+                raise RuntimeError("Failed to encode image to JPEG format.")
     else:
         raise ValueError(f"Unsupported image encoding: {encoding!r}")
     return encoded_image.tobytes()
