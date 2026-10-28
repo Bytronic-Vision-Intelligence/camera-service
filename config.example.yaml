@@ -39,6 +39,18 @@ service:
     file_type: bmp
     # serial_number / cti_path / camera_ip / port … for real backends
 
+    # # LMI Gocator (3D height map). The sensor's job (web page) must be in Surface mode
+    # # with the surface sent on Ethernet. Publish it lossless: images -> image_format: uint16.
+    # camera_type: gocator
+    # serial_number: 251869         # or camera_ip: 192.168.1.10
+    # sdk_path: C:\...\GO_SDK\bin\win64  
+    # # Line profilers (2x00) with trigger_type software: each trigger scans this many mm
+    # # of belt from that moment, as one height map.
+    # # Time-triggered: Y spacing = belt travel speed / frame rate (e.g. 100 mm/s / 182.7 Hz = 0.547 mm).
+    # scan_length_mm: 300
+    # # Cam assumed belt speed for a time-triggered job. (Optional)
+    # travel_speed_mm_s: 100
+
   # trigger_type: software | hardware
   # capture_type: single | continuous
   #

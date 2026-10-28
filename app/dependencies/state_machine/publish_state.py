@@ -42,7 +42,7 @@ class PublishState(State):
         camera_details = {**self.camera_config, **self.camera_settings}
         if self.planck_constants:
             camera_details["planck_constants"] = self.planck_constants
-        print(f"image has the following values {unique(image_details)}")
+        # print(f"image has the following values {unique(image_details)}")
         for output in self.my_state_machine.image_outputs:
             variant = apply_image_format(self.image.get("image"), output)
             variant_encoded = encode_image_to_bytes(
@@ -79,7 +79,7 @@ class PublishState(State):
             )
             return
 
-        self.__return_idle()
+        self._return_idle()
 
     def exit(self):
         self.image = []

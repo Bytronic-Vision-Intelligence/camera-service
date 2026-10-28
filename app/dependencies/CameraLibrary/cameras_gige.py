@@ -491,7 +491,6 @@ class GigeCamera(Camera):
             logging.error("fetch raised an exception")
             if retries < 5:
                 return self.capture_image(
-                    self,
                     camera,
                     timeout_ms,
                     is_converted,
