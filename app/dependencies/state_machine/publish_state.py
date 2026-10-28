@@ -26,7 +26,7 @@ class PublishState(State):
         self.trigger_config = camera.trigger_config
         self.camera_config = camera.camera_config
         self.camera_settings = camera.camera_settings
-        self.planck_constants = None # A safety to set default to None.
+        self.planck_constants = None
         if self.camera_config.get("camera_type").lower() == "flir":
             self.planck_constants = camera.planck_constants
         elif self.camera_settings.get("planck_constants"):
@@ -47,7 +47,7 @@ class PublishState(State):
             variant = apply_image_format(self.image.get("image"), output)
             variant_encoded = encode_image_to_bytes(
                 variant,
-                self.__get_type(output.get("image_format")),
+                self.__get_type(output.get("image_type")),
             )
 
             packet = {
@@ -85,10 +85,11 @@ class PublishState(State):
         self.image = []
         super().exit()
 
-    def __get_type(self, type_string: str | dict | None):
-        if type_string is None or "uint8" in type_string or "colourmap" in type_string:
+    def __get_type(self, type_string: str):
+        if "uint8" in type_string:
             return uint8
-        if "uint16" in type_string or "Mono" in type_string or "mono" in type_string:
+        if "uint16" in type_string:
             return uint16
         if "float32" in type_string:
             return float32
+        raise ValueError(f"Unsupported image_type: {type_string!r}")
