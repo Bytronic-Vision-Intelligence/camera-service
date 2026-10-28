@@ -70,6 +70,9 @@ service:
         #                           # png keeps 8-bit frames lossless for analysis
         #                           # bmp: lossless, ~15x faster to encode than png, 3x the bytes
         #                           # (~8x larger than JPEG on the wire).
+        # gamma: 0.55               # 8-bit only, after image_format: out = 255 * (in/255) ** gamma.
+        #                           # Below 1 brightens; null = none. For a model trained on
+        #                           # brightened frames, on its own output (topic_end).
 
   camera_settings: {}
   lights: {}

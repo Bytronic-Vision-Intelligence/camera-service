@@ -219,8 +219,43 @@ def _apply_mono_format(image: np.ndarray, name: str) -> np.ndarray:
     raise ValueError(f"Unsupported mono image_format: {name!r}")
 
 
+def gamma_table(gamma: float) -> np.ndarray:
+    """256-entry lookup table: out = 255 * (in / 255) ** gamma, rounded.
+
+    The same table as inference-service's and seal-width-analysis-service's
+    ``gamma``, so a model trained on frames put through either sees the same pixels.
+    """
+    return np.rint((np.arange(256) / 255.0) ** gamma * 255).astype(np.uint8)
+
+
+def _parse_gamma(image_id: str, gamma) -> float | None:
+    """An output's optional ``gamma``: None (or 1) for none, else a number above 0."""
+    if gamma is None:
+        return None
+    if isinstance(gamma, bool) or not isinstance(gamma, (int, float)) or gamma <= 0:
+        raise ValueError(
+            f"Image spec for {image_id!r}: gamma must be a number greater than 0 or null, "
+            f"got {gamma!r}"
+        )
+    return None if gamma == 1 else float(gamma)
+
+
 def apply_image_format(image: np.ndarray, output_settings) -> np.ndarray:
-    """Apply rotate, crop, then ``image_format``. ``None`` format keeps raw pixels."""
+    """Apply rotate, crop, ``image_format``, then ``gamma``. ``None`` format keeps raw pixels.
+
+    ``gamma`` (8-bit only) brightens below 1: out = 255 * (in / 255) ** gamma.
+    """
+    image = _format_image(image, output_settings)
+    gamma = output_settings.get("gamma")
+    if gamma is None:
+        return image
+    if image.dtype != np.uint8:
+        raise ValueError(f"gamma needs an 8-bit image, got {image.dtype}")
+    return cv2.LUT(image, gamma_table(float(gamma)))
+
+
+def _format_image(image: np.ndarray, output_settings) -> np.ndarray:
+    """Rotate, crop, then ``image_format``."""
     if not isinstance(output_settings, dict):
         raise ValueError("output_settings must be a mapping")
 
@@ -291,6 +326,7 @@ def parse_image_outputs(images_config) -> list[dict]:
                 "topic_end": spec.get("topic_end"),
                 "archive": bool(spec.get("archive", False)),
                 "encoding": _parse_encoding(str(image_id), spec.get("encoding")),
+                "gamma": _parse_gamma(str(image_id), spec.get("gamma")),
             }
         )
     return outputs
@@ -309,5 +345,6 @@ def resolve_image_outputs(config: dict) -> list[dict]:
             "topic_end": None,
             "archive": True,
             "encoding": None,
+            "gamma": None,
         }
     ]

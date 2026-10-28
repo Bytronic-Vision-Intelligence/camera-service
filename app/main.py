@@ -308,9 +308,9 @@ def publish_outputs(
 
     t_start = time.perf_counter()
     prepared = []
-    formatted = {}   # outputs with the same rotate/crop/format share one formatted frame
+    formatted = {}   # outputs with the same rotate/crop/format/gamma share one formatted frame
     for output in image_outputs:
-        key = repr((output.get("rotate"), output.get("crop"), output.get("image_format")))
+        key = repr((output.get("rotate"), output.get("crop"), output.get("image_format"), output.get("gamma")))
         try:
             if key not in formatted:
                 formatted[key] = apply_image_format(image, output)

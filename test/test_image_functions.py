@@ -7,6 +7,7 @@ from dependencies.image_functions import (
     decode_image_from_bytes,
     encode_date_time_to_bytes,
     encode_image_to_bytes,
+    gamma_table,
     image_encoding,
     parse_image_outputs,
     prepare_image_for_jpeg,
@@ -269,3 +270,55 @@ def test_parse_image_outputs_reads_encoding():
 def test_parse_image_outputs_rejects_an_unknown_encoding():
     with pytest.raises(ValueError, match="rgb.*encoding"):
         parse_image_outputs([{"rgb": {"encoding": "tiff"}}])
+
+
+def test_gamma_table_matches_the_inference_and_seal_width_table():
+    table = gamma_table(0.55)
+
+    # the brightening the Dunbia seal model was trained on
+    assert table[0] == 0 and table[255] == 255
+    assert table[23] == 68
+    assert table[128] == 175
+
+
+def test_gamma_brightens_after_the_format():
+    img = np.zeros((2, 3, 3), dtype=np.uint8)
+    img[..., 0] = 23   # blue in BGR, red after BGR2RGB
+
+    out = apply_image_format(img, {"image_format": {"channel": "BGR2RGB"}, "gamma": 0.55})
+
+    assert out.shape == img.shape
+    assert (out[..., 2] == 68).all()
+    assert (out[..., :2] == 0).all()
+
+
+def test_no_gamma_leaves_pixels_alone():
+    img = np.arange(24, dtype=np.uint8).reshape(2, 4, 3)
+
+    assert np.array_equal(apply_image_format(img, {"gamma": None}), img)
+
+
+def test_gamma_refuses_a_16bit_image():
+    img = np.zeros((2, 2), dtype=np.uint16)
+
+    with pytest.raises(ValueError, match="8-bit"):
+        apply_image_format(img, {"gamma": 0.55})
+
+
+def test_parse_image_outputs_reads_gamma():
+    outputs = parse_image_outputs(
+        [
+            {"rgb": {"topic_end": None}},
+            {"rgb_gamma": {"topic_end": "gamma", "gamma": 0.55}},
+            {"rgb_one": {"gamma": 1}},
+        ]
+    )
+
+    assert [o["gamma"] for o in outputs] == [None, 0.55, None]
+    assert resolve_image_outputs({})[0]["gamma"] is None
+
+
+@pytest.mark.parametrize("gamma", [0, -0.5, "0.55", True])
+def test_parse_image_outputs_rejects_a_bad_gamma(gamma):
+    with pytest.raises(ValueError, match="rgb.*gamma"):
+        parse_image_outputs([{"rgb": {"gamma": gamma}}])
