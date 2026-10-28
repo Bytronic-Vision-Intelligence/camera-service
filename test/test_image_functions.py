@@ -235,17 +235,12 @@ def test_apply_image_format_rotate_and_crop():
     assert both.shape == (5, 10)
 
 
-def test_encode_uses_array_dtype_when_encoding_is_missing():
+def test_encode_rejects_a_missing_encoding():
+    # image_type must be set per output: no guessing from the array's dtype
     raw = np.array([[0, 16383], [100, 200]], dtype=np.uint16)
-    colour = np.zeros((4, 4, 3), dtype=np.uint8)
 
-    raw_out = decode_image_from_bytes(encode_image_to_bytes(raw, None))
-    colour_out = decode_image_from_bytes(encode_image_to_bytes(colour))
-
-    assert raw_out.dtype == np.uint16
-    assert np.array_equal(raw_out, raw)
-    assert colour_out.dtype == np.uint8
-    assert colour_out.shape == colour.shape
+    with pytest.raises(ValueError, match="Unsupported image encoding: None"):
+        encode_image_to_bytes(raw, None)
 
 
 def test_encode_rejects_unknown_encoding():
