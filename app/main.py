@@ -320,12 +320,13 @@ def publish_outputs(
     ]
     for output, variant in prepared:
         topic = build_image_topic(base_image_topic, output["topic_end"])
-        image_bytes = encode_image_to_bytes(variant)
+        encoding = output.get("encoding")
+        image_bytes = encode_image_to_bytes(variant, encoding)
         packet = {
             "image": base64.b64encode(image_bytes).decode("ascii"),
             "date_time": date_time.decode("utf-8"),
             "image_id": output["id"],
-            "encoding": image_encoding(variant),
+            "encoding": image_encoding(variant, encoding),
         }
 
         info(

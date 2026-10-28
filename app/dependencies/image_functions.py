@@ -20,9 +20,26 @@ def prepare_image_for_jpeg(image: np.ndarray) -> np.ndarray:
     return img
 
 
-def encode_image_to_bytes(image: np.ndarray) -> bytes:
-    """Encode the image as JPEG (8-bit) or PNG (uint16)."""
-    if image.dtype == np.uint16:
+#: Values accepted for an output's ``encoding``. None picks by bit depth.
+ENCODINGS = ("png", "jpeg", "bmp")
+
+
+def encode_image_to_bytes(image: np.ndarray, encoding: str | None = None) -> bytes:
+    """Encode the image as PNG, JPEG or BMP.
+
+    ``encoding`` None keeps the default: PNG for uint16, JPEG for 8-bit.
+    ``"png"`` forces lossless PNG for 8-bit images too, for analysis that needs
+    detail JPEG would smear (e.g. the Dunbia seal emboss dots, the steak fat edge).
+    ``"bmp"`` is lossless and uncompressed: ~10 ms to encode a 2448x2048 colour
+    frame against ~160 ms for PNG, but 3x the bytes (8-bit only).
+    """
+    if image_encoding(image, encoding) == "bmp":
+        success, encoded_image = cv2.imencode(".bmp", image)
+        if not success:
+            raise RuntimeError("Failed to encode image to BMP format.")
+        return encoded_image.tobytes()
+
+    if image_encoding(image, encoding) == "png":
         success, encoded_image = cv2.imencode(".png", image)
         if not success:
             raise RuntimeError("Failed to encode image to PNG format.")
@@ -35,11 +52,25 @@ def encode_image_to_bytes(image: np.ndarray) -> bytes:
     return encoded_image.tobytes()
 
 
-def image_encoding(image: np.ndarray) -> str:
+def image_encoding(image: np.ndarray, encoding: str | None = None) -> str:
     """Return the on-wire encoding used by :func:`encode_image_to_bytes`."""
+    if encoding is not None:
+        return encoding
     if isinstance(image, np.ndarray) and image.dtype == np.uint16:
         return "png"
     return "jpeg"
+
+
+def _parse_encoding(image_id: str, encoding) -> str | None:
+    if encoding is None:
+        return None
+    value = str(encoding).strip().lower()
+    if value not in ENCODINGS:
+        raise ValueError(
+            f"Image spec for {image_id!r}: encoding must be one of {ENCODINGS} or null, "
+            f"got {encoding!r}"
+        )
+    return value
 
 
 def encode_date_time_to_bytes() -> bytes:
@@ -255,6 +286,7 @@ def parse_image_outputs(images_config) -> list[dict]:
                 "crop": spec.get("crop"),
                 "topic_end": spec.get("topic_end"),
                 "archive": bool(spec.get("archive", False)),
+                "encoding": _parse_encoding(str(image_id), spec.get("encoding")),
             }
         )
     return outputs
@@ -272,5 +304,6 @@ def resolve_image_outputs(config: dict) -> list[dict]:
             "crop": None,
             "topic_end": None,
             "archive": True,
+            "encoding": None,
         }
     ]
