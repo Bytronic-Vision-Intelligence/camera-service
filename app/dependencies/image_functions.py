@@ -232,8 +232,17 @@ def float_to_uint8(image: np.ndarray, low: float, high: float) -> np.ndarray:
     result[valid] = np.clip(scaled, 0, 255).astype(np.uint8)
     return result
 
+def gamma_table(gamma: float) -> np.ndarray:
+    """256-entry lookup table: out = 255 * (in / 255) ** gamma, rounded.
+
+    Just a flexibility option, in case you dont want to tune the hardware or mistakenly train the model in gamma corrected images.
+    """
+    table = np.rint((np.arange(256) / 255.0) ** gamma * 255).astype(np.uint8)
+    return table
+
+
 def apply_image_format(image: np.ndarray, output_settings) -> np.ndarray:
-    """Apply rotate, crop, resize, then ``image_format``. ``None`` format keeps raw pixels."""
+    """Apply rotate, crop, resize, gamma, then ``image_format``. ``None`` format keeps raw pixels."""
     if not isinstance(output_settings, dict):
         raise ValueError("output_settings must be a mapping")
 
@@ -245,6 +254,9 @@ def apply_image_format(image: np.ndarray, output_settings) -> np.ndarray:
 
     if output_settings.get("resize") is not None:
         image = _resize_img(image, output_settings["resize"])
+
+    if output_settings.get("gamma") is not None:
+        image = cv2.LUT(image, gamma_table(output_settings["gamma"]))
 
     image_format = output_settings.get("image_format")
     if image_format is None:
@@ -308,6 +320,7 @@ def parse_image_outputs(images_config) -> list[dict]:
                 "resize": spec.get("resize"),
                 "topic_end": spec.get("topic_end"),
                 "archive": bool(spec.get("archive", False)),
+                "gamma": spec.get("gamma"),
             }
         )
     return outputs
@@ -327,5 +340,6 @@ def resolve_image_outputs(config: dict) -> list[dict]:
             "resize": None,
             "topic_end": None,
             "archive": True,
+            "gamma": None,
         }
     ]
