@@ -51,6 +51,25 @@ def _set_bool_node(nodemap, node_name: str, value: bool) -> bool:
         return False
 
 
+def _read_numeric_node(nodemap, node_name: str):
+    """Read a GenICam float or integer node. Returns None if it cannot be read."""
+    try:
+        node = nodemap.GetNode(node_name)
+        if not PySpin.IsAvailable(node) or not PySpin.IsReadable(node):
+            logger.warning("Node %s is not readable", node_name)
+            return None
+        iface = node.GetPrincipalInterfaceType()
+        if iface == PySpin.intfIFloat:
+            return float(PySpin.CFloatPtr(node).GetValue())
+        if iface == PySpin.intfIInteger:
+            return float(PySpin.CIntegerPtr(node).GetValue())
+        logger.warning("Node %s is not numeric", node_name)
+        return None
+    except Exception:
+        logger.warning("Failed reading %s", node_name, exc_info=True)
+        return None
+
+
 class FlirCamera(Camera):
     def __init__(self):
         super().__init__()
@@ -61,6 +80,10 @@ class FlirCamera(Camera):
         self.pixel_format_out = None
         self._trigger: SpinnakerHardwareTrigger | None = None
         self._mask_mono16_msbs = False
+        self.planck_r = None
+        self.planck_b = None
+        self.planck_f = None
+        self.planck_o = None
 
     def _configure_raw_pixel_format(self, nodemap) -> None:
         """AX5 defaults to 8-bit; switch to 14-bit raw so values are not 0–255.
@@ -74,11 +97,13 @@ class FlirCamera(Camera):
             cfg = loadConfig.get_section("camera_settings")
             pixel_format = str(cfg.get("pixel_format", "Mono14"))
             cmos_depth = str(cfg.get("cmos_bit_depth", "bit14bit"))
-            temp_linear = str(cfg.get("temperature_linear_mode", "false")).lower()
+            temp_linear = str(cfg.get("temperature_linear_mode", "true")).lower()
+            temp_linear_resolution = str(cfg.get("temperature_linear_resolution", "High") or "High")
         except Exception:
             pixel_format = "Mono14"
             cmos_depth = "bit14bit"
-            temp_linear = "false"
+            temp_linear = "true"
+            temp_linear_resolution = "High"
 
         # CMOS bit depth must match PixelFormat when switching 8 <-> 14 bit.
         _set_enum_node(nodemap, "CMOSBitDepth", cmos_depth)
@@ -94,8 +119,13 @@ class FlirCamera(Camera):
 
         self._mask_mono16_msbs = pixel_format == "Mono16"
 
-        if temp_linear in ("true", "1", "yes", "on"):
-            _set_bool_node(nodemap, "TemperatureLinearMode", True)
+        # AX5 exposes this as an On/Off enum. A boolean write is rejected
+        # ("not writable") and the stream stays raw signal.
+        linear_entry = "On" if temp_linear in ("true", "1", "yes", "on") else "Off"
+        if not _set_enum_node(nodemap, "TemperatureLinearMode", linear_entry):
+            _set_bool_node(nodemap, "TemperatureLinearMode", linear_entry == "On")
+
+        _set_enum_node(nodemap, "TemperatureLinearResolution", temp_linear_resolution)
 
         try:
             pf = PySpin.CEnumerationPtr(nodemap.GetNode("PixelFormat"))
@@ -108,6 +138,20 @@ class FlirCamera(Camera):
                 "Unable to read/log active PixelFormat; continuing initialization",
                 exc_info=True,
             )
+
+    def _read_planck_constants(self, nodemap) -> None:
+        """Read the raw-signal Planck registers. T(K) = B / ln(R / (S - O) + F)."""
+        self.planck_r = _read_numeric_node(nodemap, "R")
+        self.planck_b = _read_numeric_node(nodemap, "B")
+        self.planck_f = _read_numeric_node(nodemap, "F")
+        self.planck_o = _read_numeric_node(nodemap, "O")
+        logger.info(
+            "Planck constants R=%s B=%s F=%s O=%s",
+            self.planck_r,
+            self.planck_b,
+            self.planck_f,
+            self.planck_o,
+        )
 
     def _find_camera(self):
         self.cam = None
@@ -175,6 +219,7 @@ class FlirCamera(Camera):
                     acquisition_mode.SetIntValue(continuous.GetValue())
 
             self._configure_raw_pixel_format(nodemap)
+            self._read_planck_constants(nodemap)
 
             trigger_cfg = HardwareTriggerConfig.from_app_config()
             self._trigger = SpinnakerHardwareTrigger(self.cam, trigger_cfg)
