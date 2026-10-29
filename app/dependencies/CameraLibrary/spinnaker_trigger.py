@@ -148,7 +148,6 @@ class SpinnakerHardwareTrigger:
     def _select_line(self, nodemap, source: str) -> None:
         if not set_enum(nodemap, "LineSelector", source):
             raise RuntimeError(f"Failed to select GPIO line {source}")
-        set_enum(nodemap, "LineMode", "Input")
 
     def _configure_native(self, nodemap) -> None:
         source = self.config.source

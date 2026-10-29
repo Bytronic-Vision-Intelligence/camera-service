@@ -3,33 +3,47 @@ mqtt:
   mqtt_port: 1883
   topics:
   - name: trigger
-    topic: churchill/ui/ui_1/instruction
+    topic: indonesia/ui/ui_1/instruction
     is_trigger: true
     is_subscribe: true
   - name: image
-    topic: churchill/camera/colour_1/image
+    topic: indonesia/camera/thermal_1/image
     is_trigger: false
     is_subscribe: false
+  - name: sku_selection
+    topic: indonesia/ui/ui_1/sku_selection
+    is_trigger: false
+    is_subscribe: true
 service:
   camera:
-    camera_type: gige
-    camera_id: colour_1
-    capture_timeout: 50000
-    camera_ip: 192.168.6.1
-    serial_number: '000306'
-    cti_path: C:\Users\Churchill-01\churchill\Baumer_GAPI_SDK_2.16.1_win_x86_64_c\bin\bgapi2_gige.cti
-    sensor_type: rgb
+    camera_type: flir
+    camera_id: thermal_1
+    serial_number: 73400454
   camera_settings:
-    pixel_format: RGB8
-    exposure_time_us: 10000
+    camera_type: ax5
+    burst_length: 1
+    buffer_size: 1
+    pixel_format: Mono14
+    cmos_bit_depth: bit14bit
+    temperature_linear_mode: true
+    temperature_linear_resolution: High
   trigger:
-    trigger_type: software
+    trigger_type: hardware
     capture_type: single
+    trigger_source: Line0
+    trigger_activation: RisingEdge
   images:
-  - default:
-      image_format: null
-      topic_end: null
+  - raw:
+      image_type: uint16
+      image_format: Mono14
+      topic_end: raw
       archive: true
+  - colourmap:
+      image_type: uint8
+      image_format:
+        colourmap: JET
+      topic_end: colourmap
+      archive: false
   lights: {}
   archiving:
     is_archived: true
@@ -38,3 +52,4 @@ service:
       archive_freq: daily
       archive_storage: 50
       archive_days: 30
+      file_extension: png
