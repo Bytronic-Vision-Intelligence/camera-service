@@ -71,7 +71,7 @@ service:
         image_format: null
         topic_end: null
         archive: true
-        # gamma: 0.55               # optional, after image_format: out = 255 * (in/255) ** gamma.
+        # gamma: 0.55               # optional, 8-bit only, before image_format: out = 255 * (in/255) ** gamma.
 
   camera_settings: {}
   lights: {}

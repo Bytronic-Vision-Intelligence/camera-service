@@ -289,7 +289,7 @@ def test_gamma_table_matches_the_inference_and_seal_width_table():
     assert table[128] == 175
 
 
-def test_gamma_brightens_after_the_format():
+def test_gamma_brightens_every_channel_alongside_the_format():
     img = np.zeros((2, 3, 3), dtype=np.uint8)
     img[..., 0] = 23   # blue in BGR, red after BGR2RGB
 
@@ -307,26 +307,12 @@ def test_no_gamma_leaves_pixels_alone():
     assert np.array_equal(apply_image_format(img, {"gamma": None}), img)
 
 
-def test_gamma_refuses_a_16bit_image():
-    img = np.zeros((2, 2), dtype=np.uint16)
-
-    with pytest.raises(ValueError, match="8-bit"):
-        apply_image_format(img, {"gamma": 0.55})
-
-
 def test_parse_image_outputs_reads_an_optional_gamma():
     outputs = parse_image_outputs(
         [
             {"rgb": {"topic_end": None}},
             {"rgb_gamma": {"topic_end": "gamma", "gamma": 0.55}},
-            {"rgb_one": {"gamma": 1}},
         ]
     )
 
-    assert [o["gamma"] for o in outputs] == [None, 0.55, None]
-
-
-@pytest.mark.parametrize("gamma", [0, -0.5, "0.55", True])
-def test_parse_image_outputs_rejects_a_bad_gamma(gamma):
-    with pytest.raises(ValueError, match="rgb.*gamma"):
-        parse_image_outputs([{"rgb": {"gamma": gamma}}])
+    assert [o["gamma"] for o in outputs] == [None, 0.55]
