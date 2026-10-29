@@ -71,6 +71,9 @@ service:
         image_format: null
         topic_end: null
         archive: true
+        # gamma: 0.55               # optional, 8-bit only, after image_format: out = 255 * (in/255) ** gamma.
+        #                           # Below 1 brightens; unset or null = none. For a model trained on
+        #                           # brightened frames, on its own output (topic_end).
 
   camera_settings: {}
   lights: {}
