@@ -112,12 +112,11 @@ def _line_selector_name(line) -> str:
 
 
 class GigeCamera(Camera):
-    def __init__(self):
-        super().__init__()
+    def __init__(self, config: dict | None = None):
+        super().__init__(config)
         self.cam = None
         self.harvester = None
         self.pixel_format = None
-        self.trigger_type = None
         self._lights_line_selector: str | None = None
         self._lights_line_source: str | None = None
 

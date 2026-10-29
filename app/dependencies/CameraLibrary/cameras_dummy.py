@@ -12,13 +12,13 @@ class DummyCamera(Camera):
     """A camera class used for testing with images from a file, not using any real camera.
 
     Reads ``dummy_location`` / ``file_type`` / ``in_order`` from
-    ``self.camera_config`` after ``main.set_camera_class`` injects the service
-    camera section. ``in_order: true`` walks the sorted file list and wraps;
+    ``self.camera_config`` (the service camera section passed to the
+    constructor). ``in_order: true`` walks the sorted file list and wraps;
     otherwise each capture picks a file at random.
     """
 
-    def __init__(self):
-        super().__init__()
+    def __init__(self, config: dict | None = None):
+        super().__init__(config)
         self.frame_list = []
         self.in_order = False
         self._frame_index = 0

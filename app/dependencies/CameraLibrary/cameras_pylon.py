@@ -7,8 +7,8 @@ import time
 import numpy as np
 
 class PylonCamera(Camera):
-    def __init__(self):
-        super().__init__()
+    def __init__(self, config: dict | None = None):
+        super().__init__(config)
 
     def _find_camera(self) -> pylon.InstantCamera:
         """Open by ``camera.serial_number`` when set; otherwise first available device."""
