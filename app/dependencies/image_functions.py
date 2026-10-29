@@ -234,6 +234,8 @@ def float_to_uint8(image: np.ndarray, low: float, high: float) -> np.ndarray:
 
 def gamma_table(gamma: float) -> np.ndarray:
     """256-entry lookup table: out = 255 * (in / 255) ** gamma, rounded."""
+    """Just a flexibility option, in case you dont want to tune the hardware"""
+    """Or mistakenly train the model in gamma corrected images"""
     table = np.rint((np.arange(256) / 255.0) ** gamma * 255).astype(np.uint8)
     return table
 
