@@ -38,7 +38,7 @@ class Camera:
         '''
         if position > len(buffer):
             raise ValueError(f"Error : Buffer value of {position} is larger than buffer size of {len(self.buffer)}")
-        safe_read = position-1%len(self.buffer)
+        safe_read = position # -1%len(self.buffer)
         image = buffer[safe_read]
         return image
 

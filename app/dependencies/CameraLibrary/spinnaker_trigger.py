@@ -75,6 +75,7 @@ class SpinnakerHardwareTrigger:
         if not self.config.enabled:
             self.mode = "off"
             set_enum(nodemap, "TriggerMode", "Off")
+            self._prefer_newest_buffer()
             return
 
         self._ensure_not_acquiring()
