@@ -143,7 +143,7 @@ class GocatorCamera(CameraHeightMap):
     Gocator snapshot sensor or line profiler, compatible with the CameraHeightMap interface.
 
     Usage:
-        cam = GocatorCamera()      # camera_config injected by main.set_camera_class
+        cam = GocatorCamera(service_config)   # the service section (camera, trigger, ...)
         cam.connect_to_camera()    # finds the sensor by serial (or IP), connects, starts it
         height = cam.capture_image()   # uint16 height map (see capture_image)
         cam.disconnect_camera()
@@ -157,8 +157,8 @@ class GocatorCamera(CameraHeightMap):
     ``hardware`` leaves the job as it is and returns the next surface the sensor sends.
     """
 
-    def __init__(self) -> None:
-        super().__init__()
+    def __init__(self, config: dict | None = None) -> None:
+        super().__init__(config)
         self.sdk: Optional[_GoSdk] = None
         self._api_lib = ctypes.c_void_p()
         self._api = ctypes.c_void_p()
@@ -167,7 +167,6 @@ class GocatorCamera(CameraHeightMap):
         self.serial: Optional[int] = None
         self.part_number = ""
         self.firmware = ""
-        self.trigger_type = "software"
         self.line_profiler = False
         self._running = False
         self.last_height_mm: Optional[np.ndarray] = None   # float32 mm, NaN = no data

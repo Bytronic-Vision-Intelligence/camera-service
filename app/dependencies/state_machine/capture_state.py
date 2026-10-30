@@ -70,9 +70,11 @@ class CaptureState(State):
         )
 
     def __get_image(self,camera:Camera):
-        if camera.capture_thread==None:
+        if camera.capture_thread==None: # only software + single
             image =  camera.capture_image()
         else:
+            if camera.trigger_type == "hardware":
+                camera.move_frame_to_buffer()
             image =  camera.read_from_buffer(
                 camera.buffer,
                 camera.buffer_position
