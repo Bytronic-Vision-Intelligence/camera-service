@@ -17,6 +17,7 @@ class IdleState(State):
         if not self.my_state_machine.service_id in message: return
         if message.get(self.my_state_machine.service_id) == 0: return
 
+        self.my_state_machine.message_id = message.get("message_id")
         if self.camera.trigger_type == "software":
             sleep(self.__get_delay(message.get(self.my_state_machine.service_id)))
             self.my_state_machine.change_state(

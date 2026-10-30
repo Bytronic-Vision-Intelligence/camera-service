@@ -53,7 +53,8 @@ class PublishState(State):
                 "date_time": str(self.image.get("capture_time")),
                 "image_id": output["id"],
                 "encoding": image_encoding(variant),
-                "camera_details": camera_details
+                "camera_details": camera_details,
+                "message_id": self.my_state_machine.message_id,
             }
             packet_size = getsizeof(packet.get("image"))/(1024 * 1024)
             print(f"Info : packet is {packet_size} MB")
