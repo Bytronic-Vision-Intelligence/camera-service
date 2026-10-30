@@ -1,6 +1,7 @@
 from .base_functions.state import State
 from .capture_state import CaptureState
 from dependencies.mqtt.topic import check_for_messages
+from time import sleep
 
 class IdleState(State):
     '''A state to control the idle process'''
@@ -17,6 +18,7 @@ class IdleState(State):
         if message.get(self.my_state_machine.service_id) == 0: return
 
         if self.camera.trigger_type == "software":
+            sleep(self.__get_delay(message.get(self.my_state_machine.service_id)))
             self.my_state_machine.change_state(
                 CaptureState(
                     self.my_state_machine,
@@ -26,6 +28,21 @@ class IdleState(State):
             )
         if self.camera.trigger_type == "hardware":
             ''''''
+
+    @staticmethod
+    def __get_delay(instruction) -> float:
+        '''returns the delay in s before capture, taken from an instruction of the form
+        [trigger, delay], waited once here so a burst of captures is not delayed per frame
+        Args:
+            instruction: the value sent under this camera's service_id
+        Returns:
+            the delay in s, 0 when none is given or it is not a valid number
+        '''
+        if not isinstance(instruction, list) or len(instruction) < 2: return 0.0
+        try:
+            return max(float(instruction[1]), 0.0)
+        except (TypeError, ValueError):
+            return 0.0
 
     def __mqtt_watchdog(self):
         '''a simple process that checks the state of the client and 
