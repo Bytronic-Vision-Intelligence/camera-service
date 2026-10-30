@@ -173,6 +173,8 @@ class GocatorCamera(CameraHeightMap):
         self.last_height_mm: Optional[np.ndarray] = None   # float32 mm, NaN = no data
         self.last_intensity: Optional[np.ndarray] = None   # 8-bit, same grid as the height map
         self.last_geometry: dict = {}   # x/y resolution (mm per px) and offsets (mm) of the last frame
+        # published with the frame as the packet's "metadata": {"geometry", "scan_start_time"}
+        self.last_metadata: dict = {}
 
     # -- connection lifecycle ------------------------------------------------
 
@@ -307,9 +309,11 @@ class GocatorCamera(CameraHeightMap):
             scan_start_time = datetime.now()
             sdk.check(sdk.GoSensor_Trigger(self._sensor), "GoSensor_Trigger")
         self.last_height_mm = self._receive_surface(timeout_s)
+        metadata = {"geometry": self.last_geometry}
         if scan_start_time is not None:
-            # For RGB frame alignment
-            self.last_geometry = {**self.last_geometry, "scan_start_time": str(scan_start_time)}
+            # For RGB frame alignment: the packet's date_time is when the scan ended
+            metadata["scan_start_time"] = str(scan_start_time)
+        self.last_metadata = metadata
         return prepare_raw_png(self.last_height_mm)
 
     def _receive_surface(self, timeout_s: float) -> np.ndarray:
@@ -358,9 +362,8 @@ class GocatorCamera(CameraHeightMap):
             "y_offset_mm": sdk.GoSurfaceMsg_YOffset(msg) / 1e3,
             "z_offset_mm": z_off,
         }
-        # pixel size is fixed by the job; CaptureState puts it in the packet ("geometry"). Log it when it changes
-        previous = {k: v for k, v in self.last_geometry.items() if k != "scan_start_time"}
-        if geometry != previous:
+        # pixel size is fixed by the job; it goes out in the packet's metadata. Log it when it changes
+        if geometry != self.last_geometry:
             logger.info("Gocator surface geometry: %s",
                         {k: round(v, 4) for k, v in geometry.items()})
         self.last_geometry = geometry

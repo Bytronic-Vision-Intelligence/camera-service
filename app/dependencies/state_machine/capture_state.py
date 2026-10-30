@@ -83,6 +83,6 @@ class CaptureState(State):
         frame = {
             "image": image,
             "capture_time": capture_time,
-            "geometry": getattr(camera, "last_geometry", None) or None    # 3D sensors (Gocator): mm per pixel and offsets of this frame
+            "metadata": getattr(camera, "last_metadata", None) or None    # per-frame extras, e.g. Gocator geometry + scan start
         }
         return frame
