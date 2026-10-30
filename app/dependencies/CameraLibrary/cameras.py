@@ -96,19 +96,29 @@ class Camera:
             sleep(self.frame_pace)
 
     def move_frame_to_buffer(self, timeout_s: float = 5.0):
-        '''hardware trigger: moves the oldest frame from frame_queue into the buffer.
+        '''hardware trigger: moves frames from frame_queue into the buffer.
+        single: only the oldest frame, so every trigger is handled in order.
+        continuous: every queued frame, so buffer_position ends on the newest and the queue never backs up.
+                    - Note: only the newest frames is buffered, older frame will be overwritten.
         Raises:
             TimeoutError: no frame arrived within timeout_s.
             CameraLossError: wait_for_frame reported the camera lost.'''
         try:
-            frame = self.frame_queue.get(timeout=timeout_s)
+            frames = [self.frame_queue.get(timeout=timeout_s)]
         except Empty:
             raise TimeoutError(f"No hardware-triggered frame within {timeout_s} s") from None
-        if isinstance(frame, Exception):
-            raise frame
-        position = (self.buffer_position + 1) % len(self.buffer)
-        self.buffer[position] = frame
-        self.buffer_position = position
+        if self.capture_type == "continuous":
+            while True:
+                try:
+                    frames.append(self.frame_queue.get_nowait())
+                except Empty:
+                    break
+        for frame in frames:
+            if isinstance(frame, Exception):
+                raise frame
+            position = (self.buffer_position + 1) % len(self.buffer)
+            self.buffer[position] = frame
+            self.buffer_position = position
 
     def connect_to_camera(self):
         """Connect to the camera based on the specified camera type.
