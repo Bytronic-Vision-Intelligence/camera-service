@@ -352,7 +352,7 @@ class GocatorCamera(CameraHeightMap):
             "y_offset_mm": sdk.GoSurfaceMsg_YOffset(msg) / 1e3,
             "z_offset_mm": z_off,
         }
-        # pixel size is fixed by the job and not in the published image: log it when it changes
+        # pixel size is fixed by the job; CaptureState puts it in the packet ("geometry"). Log it when it changes
         if geometry != self.last_geometry:
             logger.info("Gocator surface geometry: %s",
                         {k: round(v, 4) for k, v in geometry.items()})

@@ -80,7 +80,9 @@ class CaptureState(State):
                 camera.buffer_position
             )
         capture_time = datetime.now()
-        return {
+        frame = {
             "image": image,
-            "capture_time": capture_time
+            "capture_time": capture_time,
+            "geometry": getattr(camera, "last_geometry", None) or None    # 3D sensors (Gocator): mm per pixel and offsets of this frame
         }
+        return frame
