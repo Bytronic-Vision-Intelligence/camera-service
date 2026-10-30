@@ -8,7 +8,7 @@ from ..image_functions import (
 )
 import base64
 from ..CameraLibrary.cameras import Camera
-from numpy import unique, uint16, uint8, float32
+from numpy import uint16, uint8, float32
 from sys import getsizeof
 class PublishState(State):
     ''''''
@@ -38,11 +38,9 @@ class PublishState(State):
 
     def tick(self):
         ''''''
-        image_details = unique(self.image.get("image"))
         camera_details = {**self.camera_config, **self.camera_settings}
         if self.planck_constants:
             camera_details["planck_constants"] = self.planck_constants
-        print(f"image has the following values {unique(image_details)}")
         for output in self.my_state_machine.image_outputs:
             variant = apply_image_format(self.image.get("image"), output)
             variant_encoded = encode_image_to_bytes(
