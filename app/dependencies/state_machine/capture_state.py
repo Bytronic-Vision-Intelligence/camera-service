@@ -38,7 +38,8 @@ class CaptureState(State):
             CaptureState(
                 self.my_state_machine,
                 self.images_captured,
-                self.burst_length+1
+                self.burst_length+1,
+                exposure=self.exposure
             )
         )
 
@@ -50,7 +51,8 @@ class CaptureState(State):
     def __set_exposure(self, exposure):
         exposure = self.exposure
         if type(exposure) == list:
-            exposure = exposure[len(self.images_captured)]
+            # one exposure per burst frame; a list shorter than the burst repeats its last value
+            exposure = exposure[min(len(self.images_captured), len(exposure) - 1)]
         self.camera._set_exposure(self.camera.cam, exposure*1000)
 
     def __next_state(self):
