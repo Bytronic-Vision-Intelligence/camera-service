@@ -8,6 +8,7 @@ import logging
 import os
 from pathlib import Path
 import time
+from datetime import datetime
 from typing import Optional
 
 import numpy as np
@@ -300,10 +301,15 @@ class GocatorCamera(CameraHeightMap):
             raise RuntimeError("Gocator is not connected")
         timeout_s = 10.0 if timeout_ms is None else float(timeout_ms) / 1000.0
 
+        scan_start_time = None
         if self.trigger_type == "software":
             sdk.GoSystem_ClearData(self._system)   # drop anything left from an earlier frame
+            scan_start_time = datetime.now()
             sdk.check(sdk.GoSensor_Trigger(self._sensor), "GoSensor_Trigger")
         self.last_height_mm = self._receive_surface(timeout_s)
+        if scan_start_time is not None:
+            # For RGB frame alignment
+            self.last_geometry = {**self.last_geometry, "scan_start_time": str(scan_start_time)}
         return prepare_raw_png(self.last_height_mm)
 
     def _receive_surface(self, timeout_s: float) -> np.ndarray:
@@ -353,7 +359,8 @@ class GocatorCamera(CameraHeightMap):
             "z_offset_mm": z_off,
         }
         # pixel size is fixed by the job; CaptureState puts it in the packet ("geometry"). Log it when it changes
-        if geometry != self.last_geometry:
+        previous = {k: v for k, v in self.last_geometry.items() if k != "scan_start_time"}
+        if geometry != previous:
             logger.info("Gocator surface geometry: %s",
                         {k: round(v, 4) for k, v in geometry.items()})
         self.last_geometry = geometry
