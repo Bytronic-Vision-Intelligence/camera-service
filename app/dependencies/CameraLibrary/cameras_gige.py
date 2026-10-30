@@ -351,13 +351,17 @@ class GigeCamera(Camera):
 
             nm = self.cam.remote_device.node_map
             # Default packet size on Cognex CIC is often 576 — too small for a full frame.
-            for packet_size in (1500, 3000, 8000, 9000):
-                try:
-                    nm.GevSCPSPacketSize.value = packet_size
-                    logging.info("GevSCPSPacketSize=%s", nm.GevSCPSPacketSize.value)
-                    break
-                except Exception:
-                    continue
+            # Only raise it: the stream is already open, so shrinking a jumbo size the
+            # producer negotiated (e.g. 9000) crashes the Baumer GenTL producer on fetch.
+            current_packet_size = int(nm.GevSCPSPacketSize.value)
+            if current_packet_size < 1500:
+                for packet_size in (1500, 3000, 8000, 9000):
+                    try:
+                        nm.GevSCPSPacketSize.value = packet_size
+                        break
+                    except Exception:
+                        continue
+            logging.info("GevSCPSPacketSize=%s", nm.GevSCPSPacketSize.value)
 
             self._apply_camera_settings(self.cam)
             self._apply_lights_settings(self.cam)
