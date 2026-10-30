@@ -57,6 +57,8 @@ class PublishState(State):
                 "encoding": image_encoding(variant),
                 "camera_details": camera_details
             }
+            if self.image.get("metadata"):   ### Only for Gocater right now.
+                packet["metadata"] = self.image.get("metadata")
             packet_size = getsizeof(packet.get("image"))/(1024 * 1024)
             print(f"Info : packet is {packet_size} MB")
 

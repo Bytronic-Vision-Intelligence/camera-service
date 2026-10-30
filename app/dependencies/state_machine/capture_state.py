@@ -80,7 +80,9 @@ class CaptureState(State):
                 camera.buffer_position
             )
         capture_time = datetime.now()
-        return {
+        frame = {
             "image": image,
-            "capture_time": capture_time
+            "capture_time": capture_time,
+            "metadata": getattr(camera, "last_metadata", None) or None    # per-frame extras, e.g. Gocator geometry + scan start
         }
+        return frame
