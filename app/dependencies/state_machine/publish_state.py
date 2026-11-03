@@ -40,8 +40,10 @@ class PublishState(State):
         ''''''
         ## image_details = unique(self.image.get("image"))
         camera_details = {**self.camera_config, **self.camera_settings}
+        metadata = dict(self.image.get("metadata") or {})
         if self.planck_constants:
             camera_details["planck_constants"] = self.planck_constants
+            metadata["planck_constants"] = self.planck_constants
         # print(f"image has the following values {unique(image_details)}")
         for output in self.my_state_machine.image_outputs:
             variant = apply_image_format(self.image.get("image"), output)
@@ -57,8 +59,8 @@ class PublishState(State):
                 "encoding": image_encoding(variant),
                 "camera_details": camera_details
             }
-            if self.image.get("metadata"):   ### Only for Gocater right now.
-                packet["metadata"] = self.image.get("metadata")
+            if metadata:   # sth in metadata e.g. Gocator geometry + scan start, thermal Planck constants
+                packet["metadata"] = metadata
             packet_size = getsizeof(packet.get("image"))/(1024 * 1024)
             print(f"Info : packet is {packet_size} MB")
 
