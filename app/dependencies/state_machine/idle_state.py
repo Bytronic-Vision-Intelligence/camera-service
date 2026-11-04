@@ -12,6 +12,18 @@ class IdleState(State):
         '''Waits for a message to be received from the target, 
         then switches to the appropriate state'''
         if not self.__mqtt_watchdog():return
+
+        # hardware: capture once wait_for_frame has put a frame in the queue
+        if self.camera.trigger_type == "hardware":
+            if self.camera.frame_queue.empty(): return
+            self.my_state_machine.change_state(
+                CaptureState(
+                    self.my_state_machine,
+                    images_captured=[]
+                )
+            )
+            return
+
         message = check_for_messages(self.my_state_machine.trigger_request)
         if not self.my_state_machine.service_id in message: return
         if message.get(self.my_state_machine.service_id) == 0: return
@@ -24,8 +36,6 @@ class IdleState(State):
                     exposure=message.get("exposure")
                 )
             )
-        if self.camera.trigger_type == "hardware":
-            ''''''
 
     def __mqtt_watchdog(self):
         '''a simple process that checks the state of the client and 

@@ -113,8 +113,8 @@ def _apply_pixel_format(nodemap, pixel_format: str, fallbacks) -> str:
 
 
 class FlirCamera(Camera):
-    def __init__(self):
-        super().__init__()
+    def __init__(self, config: dict | None = None):
+        super().__init__(config)
         self.cam = None
         self.system = None
         self.cam_list = None

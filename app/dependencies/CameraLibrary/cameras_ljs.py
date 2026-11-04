@@ -99,7 +99,7 @@ class LJSCamera(CameraHeightMap):
     LJ-S8000 3D laser profile head, compatible with the CameraHeightMap interface.
 
     Usage:
-        ljs = LJSCamera()                 # reads service.camera / camera_settings
+        ljs = LJSCamera(service_config)   # reads service.camera / camera_settings
         ljs.connect_to_camera()           # opens the head, applies settings,
                                            # and starts the high-speed stream
         height_mm = ljs.capture_image()   # 2D float32 array in mm, NaN = no data
@@ -117,8 +117,8 @@ the head is triggered from its TRG terminal and ``main.py`` drains
     connection keys (and ``settings``).
     """
 
-    def __init__(self, **overrides: Any) -> None:
-        super().__init__()
+    def __init__(self, config: dict | None = None, **overrides: Any) -> None:
+        super().__init__(config)
         self._overrides = overrides
         self.host = "192.168.0.1"
         self.port = 24691
