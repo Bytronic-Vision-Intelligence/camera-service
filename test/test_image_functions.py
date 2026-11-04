@@ -8,6 +8,7 @@ from dependencies.image_functions import (
     decode_image_from_bytes,
     encode_date_time_to_bytes,
     encode_image_to_bytes,
+    encode_png_tiles,
     gamma_table,
     image_encoding,
     parse_image_outputs,
@@ -278,6 +279,7 @@ def test_resolve_image_outputs_defaults_without_images_key():
     assert outputs[0]["crop"] is None
     assert outputs[0]["resize"] is None
     assert outputs[0]["gamma"] is None
+    assert outputs[0]["tiles"] is None
 
 
 def test_gamma_table_matches_the_inference_and_seal_width_table():
@@ -316,3 +318,32 @@ def test_parse_image_outputs_reads_an_optional_gamma():
     )
 
     assert [o["gamma"] for o in outputs] == [None, 0.55]
+
+
+def test_png_tiles_stack_back_to_the_exact_frame():
+    img = np.random.default_rng(0).integers(0, 256, (101, 37, 3), dtype=np.uint8)
+
+    parts = encode_png_tiles(img, 6)
+
+    assert len(parts) == 6
+    assert all(part[:4] == b"\x89PNG" for part in parts)
+    out = np.vstack([decode_image_from_bytes(part) for part in parts])
+    assert out.dtype == img.dtype
+    assert np.array_equal(out, img)
+
+
+def test_png_tiles_never_exceed_the_number_of_rows():
+    img = np.zeros((3, 4), dtype=np.uint8)
+
+    assert len(encode_png_tiles(img, 6)) == 3
+
+
+def test_parse_image_outputs_reads_optional_tiles():
+    outputs = parse_image_outputs(
+        [
+            {"rgb": {"topic_end": None}},
+            {"rgb_png": {"topic_end": "png", "image_type": "uint16", "tiles": 6}},
+        ]
+    )
+
+    assert [o["tiles"] for o in outputs] == [None, 6]

@@ -4,6 +4,7 @@ from ..image_functions import (
     apply_image_format,
     build_image_topic,
     encode_image_to_bytes,
+    encode_png_tiles,
     image_encoding,
 )
 import base64
@@ -47,13 +48,18 @@ class PublishState(State):
         # print(f"image has the following values {unique(image_details)}")
         for output in self.my_state_machine.image_outputs:
             variant = apply_image_format(self.image.get("image"), output)
-            variant_encoded = encode_image_to_bytes(
-                variant,
-                self.__get_type(output.get("image_type")),
-            )
+            image_type = self.__get_type(output.get("image_type"))
+            tiles = int(output.get("tiles") or 1)
+            if image_type is uint16 and tiles > 1:
+                # PNG in strips encoded side by side: "image" is the list of strips, top to bottom
+                image_field = [base64.b64encode(part).decode("ascii")
+                               for part in encode_png_tiles(variant, tiles)]
+            else:
+                variant_encoded = encode_image_to_bytes(variant, image_type)
+                image_field = base64.b64encode(variant_encoded).decode("ascii")
 
             packet = {
-                "image": base64.b64encode(variant_encoded).decode("ascii"),
+                "image": image_field,
                 "date_time": str(self.image.get("capture_time")),
                 "image_id": output["id"],
                 "encoding": image_encoding(variant),
@@ -61,7 +67,8 @@ class PublishState(State):
             }
             if metadata:   # sth in metadata e.g. Gocator geometry + scan start, thermal Planck constants
                 packet["metadata"] = metadata
-            packet_size = getsizeof(packet.get("image"))/(1024 * 1024)
+            packet_size = sum(getsizeof(part) for part in (image_field if isinstance(image_field, list)
+                                                           else [image_field]))/(1024 * 1024)
             print(f"Info : packet is {packet_size} MB")
 
             topic = build_image_topic(
