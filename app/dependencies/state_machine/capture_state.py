@@ -7,19 +7,36 @@ from datetime import datetime
 from dependencies.cycle_timing import mark, mark_frame_done
 
 
+def trigger_option(camera, name: str, default: bool) -> bool:
+    """A capture switch from the camera's ``trigger`` config section.
+
+    ``pace_last_frame`` (default true): pause 2 x frame_pace after the last frame of a
+        capture as well as between burst frames, as camera-service always has. False
+        publishes the last frame straight away.
+    ``early_exposure`` (default false): write the first frame's exposure while the
+        trigger delay runs, and skip writes when the camera already has that exposure.
+        False writes it after the delay on every frame, as camera-service always has.
+    """
+    return bool((getattr(camera, "trigger_config", None) or {}).get(name, default))
+
+
 def apply_exposure(camera, exposure, frame_index):
     """Write the exposure for burst frame ``frame_index`` (ms, or a list of ms per
-    frame whose last value repeats), skipping the write when the camera already has it."""
+    frame whose last value repeats). With ``early_exposure`` on, a write is skipped when
+    the camera already has that exposure. Returns True when it wrote one."""
     if exposure is None:
         return False
     if type(exposure) == list:
         exposure = exposure[min(frame_index, len(exposure) - 1)]
     value = exposure * 1000
-    if getattr(camera, "_applied_exposure", None) == value:
+    skip_unchanged = trigger_option(camera, "early_exposure", False)
+    if skip_unchanged and getattr(camera, "_applied_exposure", None) == value:
         return False
     camera._set_exposure(camera.cam, value)
     camera._applied_exposure = value
     return True
+
+
 class CaptureState(State):
     ''''''
     def __init__(self, 
@@ -46,12 +63,14 @@ class CaptureState(State):
         image = self.__get_image(self.camera)
         self.images_captured.append(image)
 
-        if self.burst_length == self.my_state_machine.burst_length:
+        last_frame = self.burst_length == self.my_state_machine.burst_length
+        if not last_frame or trigger_option(self.camera, "pace_last_frame", True):
+            sleep(self.camera.frame_pace*2)
+            mark(self.my_state_machine, "pace sleep")
+        if last_frame:
             self.__next_state()
             return
 
-        sleep(self.camera.frame_pace*2)     # pace the frames of a burst, never the last one
-        mark(self.my_state_machine, "pace sleep")
         self.my_state_machine.change_state(
             CaptureState(
                 self.my_state_machine,

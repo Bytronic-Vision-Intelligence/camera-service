@@ -45,9 +45,10 @@ def test_untimed_cycles_print_nothing(capsys):
     assert capsys.readouterr().out == ""
 
 
-def _capture(camera, capsys):
+def _capture(camera, capsys, trigger=None):
     machine = _Machine(False)
     camera.camera_config = {"camera_type": "ljs", "camera_id": "depth_1"}
+    camera.trigger_config = trigger or {}
     machine.camera = camera
     machine.burst_length = 1
     machine.service_id = "depth_1"
@@ -67,13 +68,21 @@ def _capture(camera, capsys):
 def test_a_driver_with_its_own_steps_is_timed_through_capture_and_publish(capsys):
     out = _capture(_StepCamera(), capsys)
     assert re.search(r"Timing : depth_1 uid-2 received .*; frame done .*; wait ready \d+, capture \d+, to mm \d+, "
-                     r"format \d+, encode \d+, publish \d+; total \d+ ms \(published\)", out)
-    assert "pace sleep" not in out          # a single frame is never paced
+                     r"pace sleep \d+, format \d+, encode \d+, publish \d+; total \d+ ms \(published\)", out)
 
 
-def test_a_driver_without_steps_gets_one_capture_step(capsys):
+def test_by_default_the_last_frame_is_paced_as_it_always_was(capsys):
     camera = FakeCamera(frame=np.zeros((32, 16), np.uint16))
     camera.capture_thread = None
     camera.frame_pace = 0
     out = _capture(camera, capsys)
+    assert re.search(r"frame done .*; capture \d+, pace sleep \d+, format \d+, encode \d+, publish \d+;", out)
+
+
+def test_pace_last_frame_false_publishes_the_last_frame_at_once(capsys):
+    camera = FakeCamera(frame=np.zeros((32, 16), np.uint16))
+    camera.capture_thread = None
+    camera.frame_pace = 0
+    out = _capture(camera, capsys, trigger={"pace_last_frame": False})
     assert re.search(r"frame done .*; capture \d+, format \d+, encode \d+, publish \d+;", out)
+    assert "pace sleep" not in out

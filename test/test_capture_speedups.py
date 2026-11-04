@@ -1,5 +1,6 @@
-"""Capture speed-ups: exposure written only when it changes, exact fast LJ-S decoding,
-exact fast float -> uint16 rounding, and TRG_READY always checked at trigger time."""
+"""Capture speed-ups: exposure written only when it changes (trigger.early_exposure), exact
+fast LJ-S decoding, exact fast float -> uint16 rounding, and TRG_READY always checked at
+trigger time."""
 
 from __future__ import annotations
 
@@ -17,15 +18,24 @@ from dependencies.state_machine.capture_state import apply_exposure
 class _ExposureCamera:
     cam = object()
 
-    def __init__(self):
+    def __init__(self, trigger=None):
         self.writes = []
+        self.trigger_config = trigger or {}
 
     def _set_exposure(self, cam, value):
         self.writes.append(value)
 
 
-def test_exposure_is_written_once_and_skipped_while_unchanged():
+def test_by_default_the_exposure_is_written_every_frame_as_it_always_was():
     camera = _ExposureCamera()
+    assert apply_exposure(camera, [15, 17.5], 0) is True
+    assert apply_exposure(camera, [15, 17.5], 0) is True
+    assert apply_exposure(camera, None, 0) is False
+    assert camera.writes == [15000, 15000]
+
+
+def test_with_early_exposure_it_is_written_once_and_skipped_while_unchanged():
+    camera = _ExposureCamera({"early_exposure": True})
     assert apply_exposure(camera, [15, 17.5], 0) is True
     assert apply_exposure(camera, [15, 17.5], 0) is False      # same value: no write
     assert apply_exposure(camera, [15, 17.5], 1) is True       # next burst frame differs
