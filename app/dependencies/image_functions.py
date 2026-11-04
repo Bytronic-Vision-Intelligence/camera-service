@@ -292,11 +292,21 @@ def parse_image_outputs(images_config) -> list[dict]:
                 "rotate": spec.get("rotate"),
                 "crop": spec.get("crop"),
                 "resize": spec.get("resize"),
+                "strips": _parse_strips(image_id, spec.get("strips", 1)),
                 "topic_end": spec.get("topic_end"),
                 "archive": bool(spec.get("archive", False)),
             }
         )
     return outputs
+
+
+def _parse_strips(image_id, strips) -> int:
+    """``strips``: encode the image as this many horizontal strips in parallel (1 = one piece)."""
+    if strips is None:
+        return 1
+    if isinstance(strips, bool) or not isinstance(strips, int) or not 1 <= strips <= 32:
+        raise ValueError(f"strips for {image_id!r} must be a whole number from 1 to 32, got {strips!r}")
+    return strips
 
 
 def resolve_image_outputs(config: dict) -> list[dict]:
@@ -311,6 +321,7 @@ def resolve_image_outputs(config: dict) -> list[dict]:
             "rotate": None,
             "crop": None,
             "resize": None,
+            "strips": 1,
             "topic_end": None,
             "archive": True,
         }

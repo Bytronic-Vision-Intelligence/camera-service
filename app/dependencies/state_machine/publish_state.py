@@ -5,8 +5,9 @@ from ..image_functions import (
     build_image_topic,
     encode_image_to_bytes,
     image_encoding,
+    prepare_image_for_jpeg,
 )
-import base64
+from ..image_strips import encode_strips
 from ..CameraLibrary.cameras import Camera
 from numpy import uint16, uint8, float32
 from sys import getsizeof
@@ -43,13 +44,18 @@ class PublishState(State):
             camera_details["planck_constants"] = self.planck_constants
         for output in self.my_state_machine.image_outputs:
             variant = apply_image_format(self.image.get("image"), output)
-            variant_encoded = encode_image_to_bytes(
+            encoding_type = self.__get_type(output.get("image_type"))
+            if encoding_type == uint8:
+                # scale to 8 bits over the whole frame, not strip by strip
+                variant = prepare_image_for_jpeg(variant)
+            image_text = encode_strips(
                 variant,
-                self.__get_type(output.get("image_type")),
+                output.get("strips", 1),
+                lambda piece: encode_image_to_bytes(piece, encoding_type),
             )
 
             packet = {
-                "image": base64.b64encode(variant_encoded).decode("ascii"),
+                "image": image_text,
                 "date_time": str(self.image.get("capture_time")),
                 "image_id": output["id"],
                 "encoding": image_encoding(variant),
