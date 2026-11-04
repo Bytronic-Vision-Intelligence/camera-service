@@ -11,6 +11,8 @@ venv/
 # Never commit these: a stale copy would overwrite a live deployment config.
 /config.yaml
 /config-*.yaml
+app/configs/
+apps/
 
 # Captured and archived imagery
 *.png
