@@ -34,7 +34,17 @@ class Camera:
             self.frame_queue = Queue()
             self.stop_event = Event()
 
-        
+        #: set by CaptureState while a timed capture runs: on_step(name) and on_frame_done()
+        self.on_step = None
+        self.on_frame_done = None
+
+    def _step(self, name):
+        if self.on_step is not None:
+            self.on_step(name)
+
+    def _frame_done(self):
+        if self.on_frame_done is not None:
+            self.on_frame_done()
 
     def _set_exposure(self, camera, exposure=None):
         pass

@@ -20,6 +20,7 @@ import numpy as np
 
 from . import settings_ljs
 from .cameras import CameraHeightMap
+from ..image_strips import run_in_row_blocks
 from .hardware_trigger import report_camera_loss
 
 logger = logging.getLogger(__name__)
@@ -281,6 +282,9 @@ the head is triggered from its TRG terminal and ``main.py`` drains
         # Allocated once from the geometry PreStart reports, reused by every
         # callback (see _on_profiles) instead of allocating ~21MB per scan.
         self._scratch = np.empty(x_points * y_lines, dtype=np.uint16)
+        # Raw count -> mm for every possible count, from decode_height_mm itself,
+        # so each frame is one lookup per point with exactly the same values.
+        self._mm_lookup = decode_height_mm(np.arange(65536, dtype=np.uint16), pitch_z)
 
         res = LJSwrap.LJS8IF_StartHighSpeedDataCommunication(self.device_id)
         if res != 0:
@@ -414,9 +418,20 @@ the head is triggered from its TRG terminal and ``main.py`` drains
             logger.error("Unhandled error in LJ-S profile callback", exc_info=True)
 
     def _decode(self, raw: np.ndarray) -> np.ndarray:
-        height_mm = decode_height_mm(raw, self._pitch_z)
-        if self.interpolate_y > 1:
-            height_mm = np.repeat(height_mm, self.interpolate_y, axis=0)
+        lookup = getattr(self, "_mm_lookup", None)
+        if lookup is None:
+            height_mm = decode_height_mm(raw, self._pitch_z)
+            if self.interpolate_y > 1:
+                height_mm = np.repeat(height_mm, self.interpolate_y, axis=0)
+            return height_mm
+        repeat = max(self.interpolate_y, 1)
+        height_mm = np.empty((raw.shape[0] * repeat, raw.shape[1]), np.float32)
+
+        def block(top, bottom):
+            rows = np.take(lookup, raw[top:bottom])
+            height_mm[top * repeat:bottom * repeat] = np.repeat(rows, repeat, axis=0) if repeat > 1 else rows
+
+        run_in_row_blocks(raw.shape[0], block)
         return height_mm
 
     # -- capture ---------------------------------------------------------------
@@ -463,20 +478,17 @@ the head is triggered from its TRG terminal and ``main.py`` drains
         if timeout <= 0:
             raise ValueError(f"Error : timout must be above 0 and positive")
         deadline = time.monotonic() + timeout
-        
-        while True:
-            status = self.get_attention_status()
-            if status & _TRG_READY:
-                break
-            
-            if time.monotonic() >= deadline:
-                raise TimeoutError("LJ-S head did not report TRG_READY before timeout")
-            time.sleep(0.01)
-            
+
+        # Always confirm TRG_READY at trigger time. A "ready" seen earlier is not
+        # enough: the laser enable (dio pin 4) is switched with each cycle, so the
+        # head can be ready between cycles and not yet ready when the trigger comes.
+        self._wait_until_ready(deadline)
+        self._step("wait ready")
         res = LJSwrap.LJS8IF_Trigger(self.device_id)
         if res != 0:
             # e.g. 0x80A0 if the laser isn't enabled -- see ControlLaser(1) in connect.
             raise RuntimeError(f"LJS8IF_Trigger failed: {_hex(res)}")
+        self._step("trigger")
 
         remaining = max(deadline - time.monotonic(), 0.1)
         
@@ -484,13 +496,24 @@ the head is triggered from its TRG terminal and ``main.py`` drains
             item = self._raw_queue.get(timeout=remaining)
         except Empty:
             raise TimeoutError("Timed out waiting for LJ-S profile data") from None
-        
+        self._frame_done()   # scan finished and its data received: the lights may come on
+
         if isinstance(item, _StreamStopped):
             raise RuntimeError("LJ-S high-speed data communication was stopped")
         if isinstance(item, BaseException):
             raise item
-        
-        return self._decode(item)
+
+        height_mm = self._decode(item)
+        self._step("to mm")
+        return height_mm
+
+    def _wait_until_ready(self, deadline: float) -> None:
+        while True:
+            if self.get_attention_status() & _TRG_READY:
+                return
+            if time.monotonic() >= deadline:
+                raise TimeoutError("LJ-S head did not report TRG_READY before timeout")
+            time.sleep(0.01)
 
     def get_attention_status(self) -> int:
         """Raw LJS8IF_GetAttentionStatus bitmask (_TRG_READY / _SCMD_READY / _MEM_FULL)."""

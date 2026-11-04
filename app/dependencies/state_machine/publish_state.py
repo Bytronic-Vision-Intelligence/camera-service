@@ -5,11 +5,13 @@ from ..image_functions import (
     build_image_topic,
     encode_image_to_bytes,
     image_encoding,
+    prepare_image_for_jpeg,
 )
-import base64
+from ..image_strips import encode_strips
 from ..CameraLibrary.cameras import Camera
-from numpy import uint16, uint8, float32 ##, unique
+from numpy import uint16, uint8, float32
 from sys import getsizeof
+from dependencies.cycle_timing import mark, report
 class PublishState(State):
     ''''''
     def __init__(self, state_machine,image, state_id = "Publish State"):
@@ -38,26 +40,32 @@ class PublishState(State):
 
     def tick(self):
         ''''''
-        ## image_details = unique(self.image.get("image"))
         camera_details = {**self.camera_config, **self.camera_settings}
         metadata = dict(self.image.get("metadata") or {})
         if self.planck_constants:
             camera_details["planck_constants"] = self.planck_constants
             metadata["planck_constants"] = self.planck_constants
-        # print(f"image has the following values {unique(image_details)}")
         for output in self.my_state_machine.image_outputs:
             variant = apply_image_format(self.image.get("image"), output)
-            variant_encoded = encode_image_to_bytes(
+            encoding_type = self.__get_type(output.get("image_type"))
+            if encoding_type == uint8:
+                # scale to 8 bits over the whole frame, not strip by strip
+                variant = prepare_image_for_jpeg(variant)
+            mark(self.my_state_machine, "format")
+            image_text = encode_strips(
                 variant,
-                self.__get_type(output.get("image_type")),
+                output.get("strips", 1),
+                lambda piece: encode_image_to_bytes(piece, encoding_type),
             )
+            mark(self.my_state_machine, "encode")
 
             packet = {
-                "image": base64.b64encode(variant_encoded).decode("ascii"),
+                "image": image_text,
                 "date_time": str(self.image.get("capture_time")),
                 "image_id": output["id"],
                 "encoding": image_encoding(variant),
-                "camera_details": camera_details
+                "camera_details": camera_details,
+                "message_id": self.my_state_machine.message_id,
             }
             if metadata:   # sth in metadata e.g. Gocator geometry + scan start, thermal Planck constants
                 packet["metadata"] = metadata
@@ -69,6 +77,8 @@ class PublishState(State):
                 output.get("topic_end"),
             )
             self.my_state_machine.mqtt_client.publish(topic, packet)
+            mark(self.my_state_machine, "publish")
+        report(self.my_state_machine, "published")
 
         if self.is_archived:
             self.my_state_machine.change_state(

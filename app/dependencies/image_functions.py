@@ -181,6 +181,21 @@ def _bit_mask(bits: int) -> int:
     return (1 << bits) - 1
 
 
+def _float_to_uint16(img: np.ndarray, max_value: int) -> np.ndarray:
+    """``img.clip(0, max).round().astype(uint16)``, in row blocks on the strip pool."""
+    from .image_strips import run_in_row_blocks
+    out = np.empty(img.shape, np.uint16)
+
+    def block(top, bottom):
+        part = np.clip(img[top:bottom], 0, max_value)
+        np.rint(part, out=part)
+        with np.errstate(invalid="ignore"):       # NaN (no data) casts as it always has
+            out[top:bottom] = part
+
+    run_in_row_blocks(img.shape[0], block)
+    return out
+
+
 def _to_uint16(image: np.ndarray, bits: int | None = None) -> np.ndarray:
     """Return a 2D uint16 mono image, optionally masked to ``bits``."""
     img = image
@@ -197,7 +212,7 @@ def _to_uint16(image: np.ndarray, bits: int | None = None) -> np.ndarray:
     elif img.dtype == np.uint8:
         out = img.astype(np.uint16)
     elif img.dtype.kind == "f":
-        out = img.clip(0, max_value).round().astype(np.uint16)
+        out = _float_to_uint16(img, max_value)
     else:
         out = img.clip(0, max_value).astype(np.uint16)
 
@@ -318,12 +333,22 @@ def parse_image_outputs(images_config) -> list[dict]:
                 "rotate": spec.get("rotate"),
                 "crop": spec.get("crop"),
                 "resize": spec.get("resize"),
+                "strips": _parse_strips(image_id, spec.get("strips", 1)),
                 "topic_end": spec.get("topic_end"),
                 "archive": bool(spec.get("archive", False)),
                 "gamma": spec.get("gamma"),
             }
         )
     return outputs
+
+
+def _parse_strips(image_id, strips) -> int:
+    """``strips``: encode the image as this many horizontal strips in parallel (1 = one piece)."""
+    if strips is None:
+        return 1
+    if isinstance(strips, bool) or not isinstance(strips, int) or not 1 <= strips <= 32:
+        raise ValueError(f"strips for {image_id!r} must be a whole number from 1 to 32, got {strips!r}")
+    return strips
 
 
 def resolve_image_outputs(config: dict) -> list[dict]:
@@ -338,6 +363,7 @@ def resolve_image_outputs(config: dict) -> list[dict]:
             "rotate": None,
             "crop": None,
             "resize": None,
+            "strips": 1,
             "topic_end": None,
             "archive": True,
             "gamma": None,

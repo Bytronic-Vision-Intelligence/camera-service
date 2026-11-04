@@ -4,6 +4,8 @@ class StateMachine():
     '''a class containing state machine functionality'''
     def __init__(self, config:dict):
         self.service_id = config.get("service_id", "camera_1")
+        # message_id of the instruction being served, stamped on what is published
+        self.message_id = None
         self.mqtt_client = self.__create_mqtt_client(config)
         self.topics = self.__create_topic_listeners(config)
         self.trigger_request = self.get_topic(self.topics,"trigger")

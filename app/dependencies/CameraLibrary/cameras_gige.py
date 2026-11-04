@@ -213,10 +213,25 @@ class GigeCamera(Camera):
                 nm.ExposureMode.value = "Timed"
             except Exception:
                 logging.debug("ExposureMode not settable; continuing", exc_info=True)
-            nm.ExposureTime.value = float(exposure)
-            logging.info("ExposureTime set to %s us", nm.ExposureTime.value)
+            ratios = self._exposure_ratios()
+            if not ratios:
+                nm.ExposureTime.value = float(exposure)
+                logging.info("ExposureTime set to %s us", nm.ExposureTime.value)
+                return
+            # one sensor per colour: green takes the requested exposure, red and blue a multiple
+            # of it, which white-balances the image without adding gain
+            for channel, factor in (("Green", 1.0), *ratios.items()):
+                nm.ExposureTimeSelector.value = channel
+                nm.ExposureTime.value = float(exposure) * factor
+                logging.info("ExposureTime %s set to %s us", channel, nm.ExposureTime.value)
         except Exception as e:
             raise RuntimeError(f"Failed setting ExposureTime={exposure}") from e
+
+    def _exposure_ratios(self) -> dict:
+        """Red and blue exposure as multiples of green, from ``camera_settings.exposure_ratios``
+        (e.g. ``{red: 1.136, blue: 1.621}``); empty for a common exposure."""
+        ratios = (self.camera_settings or {}).get("exposure_ratios") or {}
+        return {str(channel).capitalize(): float(factor) for channel, factor in ratios.items()}
 
     def _set_gain(self, camera, gain=None) -> None:
         """Set ``Gain``. Defaults to ``camera_settings`` when omitted."""
@@ -254,6 +269,23 @@ class GigeCamera(Camera):
             self.pixel_format = str(nm.PixelFormat.value)
         except Exception:
             self.pixel_format = pixel_format or None
+
+        # written every start: a camera reset loses anything not set here
+        white_balance = str(cfg.get("white_balance") or "").strip()
+        if white_balance:
+            try:
+                nm.BalanceWhiteAuto.value = white_balance
+                logging.info("BalanceWhiteAuto set to %s", white_balance)
+            except Exception as e:
+                raise RuntimeError(f"Failed setting BalanceWhiteAuto={white_balance}") from e
+
+        exposure_mode = "Individual" if self._exposure_ratios() else str(cfg.get("exposure_time_mode") or "").strip()
+        if exposure_mode:
+            try:
+                nm.ExposureTimeMode.value = exposure_mode
+                logging.info("ExposureTimeMode set to %s", exposure_mode)
+            except Exception as e:
+                raise RuntimeError(f"Failed setting ExposureTimeMode={exposure_mode}") from e
 
         self._set_exposure(camera)
         self._set_gain(camera)
@@ -350,13 +382,17 @@ class GigeCamera(Camera):
 
             nm = self.cam.remote_device.node_map
             # Default packet size on Cognex CIC is often 576 — too small for a full frame.
-            for packet_size in (1500, 3000, 8000, 9000):
-                try:
-                    nm.GevSCPSPacketSize.value = packet_size
-                    logging.info("GevSCPSPacketSize=%s", nm.GevSCPSPacketSize.value)
-                    break
-                except Exception:
-                    continue
+            # Only raise it: the stream is already open, so shrinking a jumbo size the
+            # producer negotiated (e.g. 9000) crashes the Baumer GenTL producer on fetch.
+            current_packet_size = int(nm.GevSCPSPacketSize.value)
+            if current_packet_size < 1500:
+                for packet_size in (1500, 3000, 8000, 9000):
+                    try:
+                        nm.GevSCPSPacketSize.value = packet_size
+                        break
+                    except Exception:
+                        continue
+            logging.info("GevSCPSPacketSize=%s", nm.GevSCPSPacketSize.value)
 
             self._apply_camera_settings(self.cam)
             self._apply_lights_settings(self.cam)

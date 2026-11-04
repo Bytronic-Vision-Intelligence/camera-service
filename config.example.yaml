@@ -65,12 +65,18 @@ service:
     # continuous_fps: 2           # used if trigger_delay is 0
     # trigger_source: Line1       # hardware/single
     # trigger_activation: RisingEdge
+    # pace_last_frame: true       # pause 2 x frame_pace after the last frame too (false: publish at once)
+    # early_exposure: false       # true: write the exposure during the trigger delay, and only when it changes
 
   images:
     - default:
         image_format: null
         topic_end: null
         archive: true
+        # crop: [{x: [0.1, 0.9]}, {y: [0.0, 0.8]}]   # fractions of the frame, applied before encoding
+        # strips: 1               # >1 encodes N horizontal strips in parallel, sent as one text with each
+        #                         # strip's base64 joined by "|". Every reader of this topic must understand
+        #                         # strips first: a reader that does not decodes only the top strip.
         # gamma: 0.55               # optional, 8-bit only, before image_format: out = 255 * (in/255) ** gamma.
 
   camera_settings: {}
