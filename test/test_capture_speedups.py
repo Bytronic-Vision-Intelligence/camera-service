@@ -1,5 +1,5 @@
 """Capture speed-ups: exposure written only when it changes, exact fast LJ-S decoding,
-exact fast float -> uint16 rounding, and triggering at once when the head was seen ready."""
+exact fast float -> uint16 rounding, and TRG_READY always checked at trigger time."""
 
 from __future__ import annotations
 
@@ -70,17 +70,16 @@ def test_float_to_uint16_rounds_exactly_as_before():
 
 
 class _FakeLJSwrap:
-    """Stands in for the DLL: records triggers, refuses the first if told to."""
+    """Stands in for the DLL: records triggers and status checks."""
 
-    def __init__(self, refuse_first=False, ready=True):
+    def __init__(self, ready=True):
         self.triggers = 0
         self.status_calls = 0
-        self.refuse_first = refuse_first
         self.ready = ready
 
     def LJS8IF_Trigger(self, device_id):
         self.triggers += 1
-        return 0x8001 if (self.refuse_first and self.triggers == 1) else 0
+        return 0
 
     def LJS8IF_GetAttentionStatus(self, device_id, status):
         self.status_calls += 1
@@ -96,25 +95,7 @@ def _connected(monkeypatch, fake):
     return camera
 
 
-def test_a_head_seen_ready_while_idle_is_triggered_without_polling(monkeypatch):
-    fake = _FakeLJSwrap()
-    camera = _connected(monkeypatch, fake)
-    assert camera.prepare_for_trigger() is True
-    calls_before = fake.status_calls
-    image = camera.capture_image(timeout_ms=1000)
-    assert fake.status_calls == calls_before and fake.triggers == 1
-    assert image.shape == (4, 4)
-
-
-def test_a_refused_trigger_falls_back_to_polling_and_retries(monkeypatch):
-    fake = _FakeLJSwrap(refuse_first=True)
-    camera = _connected(monkeypatch, fake)
-    camera.prepare_for_trigger()
-    camera.capture_image(timeout_ms=1000)
-    assert fake.triggers == 2
-
-
-def test_without_the_idle_check_the_head_is_polled_first(monkeypatch):
+def test_the_head_is_always_polled_for_ready_at_trigger_time(monkeypatch):
     fake = _FakeLJSwrap()
     camera = _connected(monkeypatch, fake)
     camera.capture_image(timeout_ms=1000)

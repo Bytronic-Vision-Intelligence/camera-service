@@ -434,15 +434,6 @@ the head is triggered from its TRG terminal and ``main.py`` drains
         run_in_row_blocks(raw.shape[0], block)
         return height_mm
 
-    def prepare_for_trigger(self) -> bool:
-        """Between cycles: note whether the head is ready, so the next capture can
-        trigger at once instead of polling. Returns True once it is ready."""
-        try:
-            self._trigger_ready = bool(self.get_attention_status() & _TRG_READY)
-        except Exception:
-            self._trigger_ready = False
-        return self._trigger_ready
-
     # -- capture ---------------------------------------------------------------
 
     def wait_for_frame(self, queue: Queue, stop_event: Event) -> None:
@@ -488,21 +479,15 @@ the head is triggered from its TRG terminal and ``main.py`` drains
             raise ValueError(f"Error : timout must be above 0 and positive")
         deadline = time.monotonic() + timeout
 
-        # Ready was confirmed while idle (prepare_for_trigger): trigger straight away,
-        # and only fall back to polling if the head turns it down.
-        res = None
-        if getattr(self, "_trigger_ready", False):
-            self._trigger_ready = False
-            res = LJSwrap.LJS8IF_Trigger(self.device_id)
-            if res != 0:
-                logger.info("LJ-S trigger refused (%s) although ready was seen; polling", _hex(res))
+        # Always confirm TRG_READY at trigger time. A "ready" seen earlier is not
+        # enough: the laser enable (dio pin 4) is switched with each cycle, so the
+        # head can be ready between cycles and not yet ready when the trigger comes.
+        self._wait_until_ready(deadline)
+        self._step("wait ready")
+        res = LJSwrap.LJS8IF_Trigger(self.device_id)
         if res != 0:
-            self._wait_until_ready(deadline)
-            self._step("wait ready")
-            res = LJSwrap.LJS8IF_Trigger(self.device_id)
-            if res != 0:
-                # e.g. 0x80A0 if the laser isn't enabled -- see ControlLaser(1) in connect.
-                raise RuntimeError(f"LJS8IF_Trigger failed: {_hex(res)}")
+            # e.g. 0x80A0 if the laser isn't enabled -- see ControlLaser(1) in connect.
+            raise RuntimeError(f"LJS8IF_Trigger failed: {_hex(res)}")
         self._step("trigger")
 
         remaining = max(deadline - time.monotonic(), 0.1)
