@@ -43,6 +43,20 @@ def strip_bounds(height: int, strips: int, align: int = ROW_ALIGN) -> list[tuple
     return list(zip(cuts, cuts[1:]))
 
 
+def run_in_row_blocks(rows: int, work: Callable[[int, int], None], blocks: int = 4, min_rows: int = 256) -> None:
+    """Call ``work(top, bottom)`` for ``blocks`` row ranges on the thread pool and wait.
+
+    For whole-frame numpy work (lookups, rounding) that runs on one core: the
+    blocks write disjoint rows of a preallocated output, and numpy releases the
+    GIL on large array operations. Small images run in one piece.
+    """
+    if blocks <= 1 or rows < min_rows:
+        work(0, rows)
+        return
+    cuts = [rows * i // blocks for i in range(blocks + 1)]
+    list(_pool().map(lambda i: work(cuts[i], cuts[i + 1]), range(blocks)))
+
+
 def encode_strips(image: np.ndarray, strips: int, encode: Callable[[np.ndarray], bytes]) -> str:
     """Encode ``image`` as ``strips`` horizontal strips in parallel; returns the wire text."""
     if strips is None or int(strips) <= 1:

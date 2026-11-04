@@ -5,6 +5,21 @@ from .get_best_frame_state import GetBestFrameState
 from time import sleep
 from datetime import datetime
 from dependencies.cycle_timing import mark, mark_frame_done
+
+
+def apply_exposure(camera, exposure, frame_index):
+    """Write the exposure for burst frame ``frame_index`` (ms, or a list of ms per
+    frame whose last value repeats), skipping the write when the camera already has it."""
+    if exposure is None:
+        return False
+    if type(exposure) == list:
+        exposure = exposure[min(frame_index, len(exposure) - 1)]
+    value = exposure * 1000
+    if getattr(camera, "_applied_exposure", None) == value:
+        return False
+    camera._set_exposure(camera.cam, value)
+    camera._applied_exposure = value
+    return True
 class CaptureState(State):
     ''''''
     def __init__(self, 
@@ -25,8 +40,7 @@ class CaptureState(State):
 
     def tick(self):
         ''''''
-        if self.exposure != None:
-            self.__set_exposure(self.exposure)
+        if apply_exposure(self.camera, self.exposure, len(self.images_captured)):
             mark(self.my_state_machine, "set exposure")
 
         image = self.__get_image(self.camera)
@@ -35,7 +49,9 @@ class CaptureState(State):
         if self.burst_length == self.my_state_machine.burst_length:
             self.__next_state()
             return
-        
+
+        sleep(self.camera.frame_pace*2)     # pace the frames of a burst, never the last one
+        mark(self.my_state_machine, "pace sleep")
         self.my_state_machine.change_state(
             CaptureState(
                 self.my_state_machine,
@@ -46,17 +62,8 @@ class CaptureState(State):
         )
 
     def exit(self):
-        sleep(self.camera.frame_pace*2)
-        mark(self.my_state_machine, "pace sleep")
         self.images_captured = []
         return super().exit()
-
-    def __set_exposure(self, exposure):
-        exposure = self.exposure
-        if type(exposure) == list:
-            # one exposure per burst frame; a list shorter than the burst repeats its last value
-            exposure = exposure[min(len(self.images_captured), len(exposure) - 1)]
-        self.camera._set_exposure(self.camera.cam, exposure*1000)
 
     def __next_state(self):
         if self.my_state_machine.burst_length ==1:
@@ -80,6 +87,9 @@ class CaptureState(State):
         camera.on_frame_done = lambda: mark_frame_done(self.my_state_machine)
         try:
             image = self.__read_image(camera)
+        except Exception:
+            camera._applied_exposure = None     # a failed capture may mean a reset camera
+            raise
         finally:
             camera.on_step = camera.on_frame_done = None
         if timing is not None and timing.frame_done is None:

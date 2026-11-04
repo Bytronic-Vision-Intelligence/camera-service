@@ -31,6 +31,11 @@ class Camera:
         self.on_step = None
         self.on_frame_done = None
 
+    def prepare_for_trigger(self) -> bool:
+        """Called while idle between cycles; a driver can get ready for the next
+        trigger here. Returns True when there is nothing more to do."""
+        return True
+
     def _step(self, name):
         if self.on_step is not None:
             self.on_step(name)

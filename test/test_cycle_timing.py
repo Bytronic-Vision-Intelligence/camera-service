@@ -67,7 +67,8 @@ def _capture(camera, capsys):
 def test_a_driver_with_its_own_steps_is_timed_through_capture_and_publish(capsys):
     out = _capture(_StepCamera(), capsys)
     assert re.search(r"Timing : depth_1 uid-2 received .*; frame done .*; wait ready \d+, capture \d+, to mm \d+, "
-                     r"pace sleep \d+, format \d+, encode \d+, publish \d+; total \d+ ms \(published\)", out)
+                     r"format \d+, encode \d+, publish \d+; total \d+ ms \(published\)", out)
+    assert "pace sleep" not in out          # a single frame is never paced
 
 
 def test_a_driver_without_steps_gets_one_capture_step(capsys):
@@ -75,4 +76,4 @@ def test_a_driver_without_steps_gets_one_capture_step(capsys):
     camera.capture_thread = None
     camera.frame_pace = 0
     out = _capture(camera, capsys)
-    assert re.search(r"frame done .*; capture \d+, pace sleep \d+, format \d+, encode \d+, publish \d+;", out)
+    assert re.search(r"frame done .*; capture \d+, format \d+, encode \d+, publish \d+;", out)

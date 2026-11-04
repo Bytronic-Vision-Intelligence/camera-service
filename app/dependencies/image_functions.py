@@ -167,6 +167,21 @@ def _bit_mask(bits: int) -> int:
     return (1 << bits) - 1
 
 
+def _float_to_uint16(img: np.ndarray, max_value: int) -> np.ndarray:
+    """``img.clip(0, max).round().astype(uint16)``, in row blocks on the strip pool."""
+    from .image_strips import run_in_row_blocks
+    out = np.empty(img.shape, np.uint16)
+
+    def block(top, bottom):
+        part = np.clip(img[top:bottom], 0, max_value)
+        np.rint(part, out=part)
+        with np.errstate(invalid="ignore"):       # NaN (no data) casts as it always has
+            out[top:bottom] = part
+
+    run_in_row_blocks(img.shape[0], block)
+    return out
+
+
 def _to_uint16(image: np.ndarray, bits: int | None = None) -> np.ndarray:
     """Return a 2D uint16 mono image, optionally masked to ``bits``."""
     img = image
@@ -183,7 +198,7 @@ def _to_uint16(image: np.ndarray, bits: int | None = None) -> np.ndarray:
     elif img.dtype == np.uint8:
         out = img.astype(np.uint16)
     elif img.dtype.kind == "f":
-        out = img.clip(0, max_value).round().astype(np.uint16)
+        out = _float_to_uint16(img, max_value)
     else:
         out = img.clip(0, max_value).astype(np.uint16)
 
