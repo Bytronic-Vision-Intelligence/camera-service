@@ -116,13 +116,16 @@ class CaptureState(State):
         capture_time = datetime.now()
         return {
             "image": image,
-            "capture_time": capture_time
+            "capture_time": capture_time,
+            "metadata": getattr(camera, "last_metadata", None) or None    # per-frame extras, e.g. Gocator geometry + scan start
         }
 
     def __read_image(self, camera:Camera):
-        if camera.capture_thread==None:
+        if camera.capture_thread==None: # only software + single
             image =  camera.capture_image()
         else:
+            if camera.trigger_type == "hardware":
+                camera.move_frame_to_buffer()
             image =  camera.read_from_buffer(
                 camera.buffer,
                 camera.buffer_position

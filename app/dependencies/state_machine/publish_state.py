@@ -41,8 +41,10 @@ class PublishState(State):
     def tick(self):
         ''''''
         camera_details = {**self.camera_config, **self.camera_settings}
+        metadata = dict(self.image.get("metadata") or {})
         if self.planck_constants:
             camera_details["planck_constants"] = self.planck_constants
+            metadata["planck_constants"] = self.planck_constants
         for output in self.my_state_machine.image_outputs:
             variant = apply_image_format(self.image.get("image"), output)
             encoding_type = self.__get_type(output.get("image_type"))
@@ -65,6 +67,8 @@ class PublishState(State):
                 "camera_details": camera_details,
                 "message_id": self.my_state_machine.message_id,
             }
+            if metadata:   # sth in metadata e.g. Gocator geometry + scan start, thermal Planck constants
+                packet["metadata"] = metadata
             packet_size = getsizeof(packet.get("image"))/(1024 * 1024)
             print(f"Info : packet is {packet_size} MB")
 

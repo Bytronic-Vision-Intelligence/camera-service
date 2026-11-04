@@ -1,0 +1,6 @@
+[flake8]
+# .venv must be excluded: the local act runner bind-mounts the whole repo, so
+# without this flake8 lints every installed package in the virtualenv.
+exclude = .git,__pycache__,.venv,venv,docker-local,junit
+max-line-length = 127
+max-complexity = 10

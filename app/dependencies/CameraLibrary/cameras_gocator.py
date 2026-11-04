@@ -1,4 +1,5 @@
-"""LMI Gocator (snapshot sensors, e.g. Gocator 3210) through LMI's GoSdk. --> Probably also good with lineview, pending testing."""
+"""LMI Gocator through LMI's GoSdk: snapshot sensors (e.g. Gocator 3210) and line profilers
+(e.g. Gocator 2150), each giving one height map per software trigger."""
 
 from __future__ import annotations
 
@@ -7,6 +8,7 @@ import logging
 import os
 from pathlib import Path
 import time
+from datetime import datetime
 from typing import Optional
 
 import numpy as np
@@ -28,6 +30,9 @@ kERROR_STATE = -1000   # operation not possible in the sensor's current state
 # GoSdkDef.h
 GO_TRIGGER_TIME, GO_TRIGGER_INPUT, GO_TRIGGER_SOFTWARE = 0, 2, 3
 GO_MODE_SURFACE = 3
+GO_FAMILY_2000 = 1   # 2x00 line profilers
+GO_SURFACE_GENERATION_TYPE_FIXED_LENGTH = 1
+GO_SURFACE_GENERATION_START_TRIGGER_SOFTWARE = 2
 GO_DATA_MESSAGE_TYPE_UNIFORM_SURFACE = 8
 GO_DATA_MESSAGE_TYPE_SURFACE_INTENSITY = 9
 INVALID_RANGE_16BIT = -32768   # height samples with no data
@@ -80,11 +85,21 @@ class _GoSdk:
             (self.go, "GoSensor_PartNumber", status, [p, ctypes.c_char_p, size]),
             (self.go, "GoSensor_FirmwareVersion", ctypes.c_uint32, [p]),
             (self.go, "GoSensor_State", ctypes.c_int32, [p]),
+            (self.go, "GoSensor_Family", ctypes.c_int32, [p]),
             (self.go, "GoSensor_Setup", p, [p]),
+            (self.go, "GoSensor_Transform", p, [p]),
             (self.go, "GoSensor_Trigger", status, [p]),
+            (self.go, "GoTransform_SetSpeed", status, [p, ctypes.c_double]),
+            (self.go, "GoTransform_Speed", ctypes.c_double, [p]),
+            (self.go, "GoSetup_FrameRate", ctypes.c_double, [p]),
             (self.go, "GoSetup_SetTriggerSource", status, [p, ctypes.c_int32]),
             (self.go, "GoSetup_TriggerSource", ctypes.c_int32, [p]),
             (self.go, "GoSetup_SetScanMode", status, [p, ctypes.c_int32]),
+            (self.go, "GoSetup_SurfaceGeneration", p, [p]),
+            (self.go, "GoSurfaceGeneration_SetGenerationType", status, [p, ctypes.c_int32]),
+            (self.go, "GoSurfaceGenerationFixedLength_SetStartTrigger", status, [p, ctypes.c_int32]),
+            (self.go, "GoSurfaceGenerationFixedLength_SetLength", status, [p, ctypes.c_double]),
+            (self.go, "GoSurfaceGenerationFixedLength_Length", ctypes.c_double, [p]),
             (self.go, "GoSystem_EnableData", status, [p, ctypes.c_int32]),
             (self.go, "GoSystem_ClearData", status, [p]),
             (self.go, "GoSystem_Start", status, [p]),
@@ -126,21 +141,25 @@ def _rows(row_at, msg, length: int, width: int, dtype) -> np.ndarray:
 
 class GocatorCamera(CameraHeightMap):
     """
-    Gocator snapshot sensor, compatible with the CameraHeightMap interface.
+    Gocator snapshot sensor or line profiler, compatible with the CameraHeightMap interface.
 
     Usage:
-        cam = GocatorCamera()      # camera_config injected by main.set_camera_class
+        cam = GocatorCamera(service_config)   # the service section (camera, trigger, ...)
         cam.connect_to_camera()    # finds the sensor by serial (or IP), connects, starts it
-        height_mm = cam.capture_image()   # 2D float32 in mm, NaN = no data
+        height = cam.capture_image()   # uint16 height map (see capture_image)
         cam.disconnect_camera()
 
     The sensor's job (set up in its web page) must be in Surface mode with the surface
-    (and optionally intensity) sent on Ethernet. ``trigger.trigger_type: software`` sets
-    the job's trigger source to Software; ``hardware`` leaves it as the job has it.
+    (and optionally intensity) sent on Ethernet. ``trigger.trigger_type: software``:
+      - snapshot sensor (3x00): sets the job's trigger source to Software.
+      - line profiler (2x00): keeps the job's profile trigger (time or encoder) and sets
+        surface generation to Fixed Length. Such that one trigger scans ``camera.scan_length_mm`` of belt from that moment.
+
+    ``hardware`` leaves the job as it is and returns the next surface the sensor sends.
     """
 
-    def __init__(self) -> None:
-        super().__init__()
+    def __init__(self, config: dict | None = None) -> None:
+        super().__init__(config)
         self.sdk: Optional[_GoSdk] = None
         self._api_lib = ctypes.c_void_p()
         self._api = ctypes.c_void_p()
@@ -149,11 +168,13 @@ class GocatorCamera(CameraHeightMap):
         self.serial: Optional[int] = None
         self.part_number = ""
         self.firmware = ""
-        self.trigger_type = "software"
+        self.line_profiler = False
         self._running = False
         self.last_height_mm: Optional[np.ndarray] = None   # float32 mm, NaN = no data
         self.last_intensity: Optional[np.ndarray] = None   # 8-bit, same grid as the height map
         self.last_geometry: dict = {}   # x/y resolution (mm per px) and offsets (mm) of the last frame
+        # published with the frame as the packet's "metadata": {"geometry", "scan_start_time"}
+        self.last_metadata: dict = {}
 
     # -- connection lifecycle ------------------------------------------------
 
@@ -204,7 +225,13 @@ class GocatorCamera(CameraHeightMap):
             setup = sdk.GoSensor_Setup(self._sensor)
             # height maps only come in Surface mode (the web page may have left it in Video)
             sdk.check(sdk.GoSetup_SetScanMode(setup, GO_MODE_SURFACE), "GoSetup_SetScanMode(surface)")
-            if self.trigger_type == "software":
+            self.line_profiler = int(sdk.GoSensor_Family(self._sensor)) == GO_FAMILY_2000
+            if self.line_profiler:
+                self._travel_speed(setup, camera.get("travel_speed_mm_s"))
+            if self.trigger_type == "software" and self.line_profiler:
+                # start a fixed-length surface scan, paced by the job's trigger.
+                self._software_started_surface(setup, camera.get("scan_length_mm"))
+            elif self.trigger_type == "software":
                 sdk.check(sdk.GoSetup_SetTriggerSource(setup, GO_TRIGGER_SOFTWARE), "GoSetup_SetTriggerSource(software)")
             logger.info("Gocator trigger source: %s", int(sdk.GoSetup_TriggerSource(setup)))
 
@@ -225,8 +252,35 @@ class GocatorCamera(CameraHeightMap):
         self.cam = self._sensor
         return self
 
+    def _travel_speed(self, setup, speed_mm_s) -> None:
+        """Line profile (time-triggered): Y spacing = travel speed / frame rate.
+        Configure the measured/given line speed and able that assumption to the line cam."""
+        sdk = self.sdk
+        transform = sdk.GoSensor_Transform(self._sensor)
+        if speed_mm_s not in (None, ""):
+            sdk.check(sdk.GoTransform_SetSpeed(transform, float(speed_mm_s)),
+                      f"GoTransform_SetSpeed({speed_mm_s})")
+        speed, rate = sdk.GoTransform_Speed(transform), sdk.GoSetup_FrameRate(setup)
+        logger.info("Gocator travel speed %.1f mm/s at %.1f Hz: %.4f mm per profile (time trigger)",
+                    speed, rate, speed / rate if rate else float("nan"))
+
+    def _software_started_surface(self, setup, length_mm) -> None:
+        """Line profiler: one software trigger -> one fixed-length surface."""
+        sdk = self.sdk
+        generation = sdk.GoSetup_SurfaceGeneration(setup)
+        sdk.check(sdk.GoSurfaceGeneration_SetGenerationType(generation, GO_SURFACE_GENERATION_TYPE_FIXED_LENGTH),
+                  "GoSurfaceGeneration_SetGenerationType(fixed length)")
+        sdk.check(sdk.GoSurfaceGenerationFixedLength_SetStartTrigger(generation, GO_SURFACE_GENERATION_START_TRIGGER_SOFTWARE),
+                  "GoSurfaceGenerationFixedLength_SetStartTrigger(software)")
+        if length_mm not in (None, ""):
+            sdk.check(sdk.GoSurfaceGenerationFixedLength_SetLength(generation, float(length_mm)),
+                      f"GoSurfaceGenerationFixedLength_SetLength({length_mm})")
+        logger.info("Gocator line profiler: %.1f mm fixed-length surface per software trigger",
+                    sdk.GoSurfaceGenerationFixedLength_Length(generation))
+
     def capture_image(self, timeout_ms: Optional[float] = None) -> np.ndarray:
-        """Take one snapshot (software trigger) and return its height map.
+        """Take one snapshot, or scan one fixed length on a line profiler and return its height map. 
+        On a line profiler the call lasts as long as the scan: scan_length_mm / belt speed (100 mm at 100 mm/s: about 1 s).
 
         Returns a (rows, cols) uint16 image, one height per pixel:
             value = round(height_mm * 100) + 32768   (0.01 mm steps)
@@ -249,10 +303,17 @@ class GocatorCamera(CameraHeightMap):
             raise RuntimeError("Gocator is not connected")
         timeout_s = 10.0 if timeout_ms is None else float(timeout_ms) / 1000.0
 
+        scan_start_time = None
         if self.trigger_type == "software":
             sdk.GoSystem_ClearData(self._system)   # drop anything left from an earlier frame
+            scan_start_time = datetime.now()
             sdk.check(sdk.GoSensor_Trigger(self._sensor), "GoSensor_Trigger")
         self.last_height_mm = self._receive_surface(timeout_s)
+        metadata = {"geometry": self.last_geometry}
+        if scan_start_time is not None:
+            # For RGB frame alignment: the packet's date_time is when the scan ended
+            metadata["scan_start_time"] = str(scan_start_time)
+        self.last_metadata = metadata
         return prepare_raw_png(self.last_height_mm)
 
     def _receive_surface(self, timeout_s: float) -> np.ndarray:
@@ -301,7 +362,7 @@ class GocatorCamera(CameraHeightMap):
             "y_offset_mm": sdk.GoSurfaceMsg_YOffset(msg) / 1e3,
             "z_offset_mm": z_off,
         }
-        # pixel size is fixed by the job and not in the published image: log it when it changes
+        # pixel size is fixed by the job; it goes out in the packet's metadata. Log it when it changes
         if geometry != self.last_geometry:
             logger.info("Gocator surface geometry: %s",
                         {k: round(v, 4) for k, v in geometry.items()})

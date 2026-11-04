@@ -2,6 +2,9 @@ import numpy as np
 import cv2
 from time import localtime, strftime
 
+#: JPEG byte limit; larger images are scaled down until they fit. None = no limit.
+MAX_IMG_SIZE: int | None = None
+
 
 def prepare_image_for_jpeg(image: np.ndarray) -> np.ndarray:
     """Return an 8-bit image suitable for JPEG (keeps mono HxW raw layout)."""
@@ -20,8 +23,11 @@ def prepare_image_for_jpeg(image: np.ndarray) -> np.ndarray:
     return img
 
 
-def encode_image_to_bytes(image: np.ndarray, encoding:type) -> bytes:
-    """Encode the image as JPEG (8-bit) or PNG (uint16)."""
+def encode_image_to_bytes(image: np.ndarray, encoding: type) -> bytes:
+    """Encode the image as JPEG (uint8), PNG (uint16) or TIFF (float32).
+
+    JPEG larger than ``MAX_IMG_SIZE`` bytes is scaled down by 0.75 until it fits.
+    """
     if encoding == np.uint16:
         success, encoded_image = cv2.imencode(".png", image)
         if not success:
@@ -35,6 +41,14 @@ def encode_image_to_bytes(image: np.ndarray, encoding:type) -> bytes:
         success, encoded_image = cv2.imencode(".jpg", img)
         if not success:
             raise RuntimeError("Failed to encode image to JPEG format.")
+        while MAX_IMG_SIZE and encoded_image.size > MAX_IMG_SIZE:
+            smaller = _resize_img(img, 0.75)
+            if smaller.shape == img.shape:
+                break   # too small to shrink further
+            img = smaller
+            success, encoded_image = cv2.imencode(".jpg", img)
+            if not success:
+                raise RuntimeError("Failed to encode image to JPEG format.")
     else:
         raise ValueError(f"Unsupported image encoding: {encoding!r}")
     return encoded_image.tobytes()
@@ -233,8 +247,17 @@ def float_to_uint8(image: np.ndarray, low: float, high: float) -> np.ndarray:
     result[valid] = np.clip(scaled, 0, 255).astype(np.uint8)
     return result
 
+def gamma_table(gamma: float) -> np.ndarray:
+    """256-entry lookup table: out = 255 * (in / 255) ** gamma, rounded.
+
+    Just a flexibility option, in case you dont want to tune the hardware or mistakenly train the model in gamma corrected images.
+    """
+    table = np.rint((np.arange(256) / 255.0) ** gamma * 255).astype(np.uint8)
+    return table
+
+
 def apply_image_format(image: np.ndarray, output_settings) -> np.ndarray:
-    """Apply rotate, crop, resize, then ``image_format``. ``None`` format keeps raw pixels."""
+    """Apply rotate, crop, resize, gamma, then ``image_format``. ``None`` format keeps raw pixels."""
     if not isinstance(output_settings, dict):
         raise ValueError("output_settings must be a mapping")
 
@@ -246,6 +269,9 @@ def apply_image_format(image: np.ndarray, output_settings) -> np.ndarray:
 
     if output_settings.get("resize") is not None:
         image = _resize_img(image, output_settings["resize"])
+
+    if output_settings.get("gamma") is not None:
+        image = cv2.LUT(image, gamma_table(output_settings["gamma"]))
 
     image_format = output_settings.get("image_format")
     if image_format is None:
@@ -310,6 +336,7 @@ def parse_image_outputs(images_config) -> list[dict]:
                 "strips": _parse_strips(image_id, spec.get("strips", 1)),
                 "topic_end": spec.get("topic_end"),
                 "archive": bool(spec.get("archive", False)),
+                "gamma": spec.get("gamma"),
             }
         )
     return outputs
@@ -339,5 +366,6 @@ def resolve_image_outputs(config: dict) -> list[dict]:
             "strips": 1,
             "topic_end": None,
             "archive": True,
+            "gamma": None,
         }
     ]

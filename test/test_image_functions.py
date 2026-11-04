@@ -8,6 +8,7 @@ from dependencies.image_functions import (
     decode_image_from_bytes,
     encode_date_time_to_bytes,
     encode_image_to_bytes,
+    gamma_table,
     image_encoding,
     parse_image_outputs,
     _resize_img,
@@ -235,17 +236,12 @@ def test_apply_image_format_rotate_and_crop():
     assert both.shape == (5, 10)
 
 
-def test_encode_uses_array_dtype_when_encoding_is_missing():
+def test_encode_rejects_a_missing_encoding():
+    # image_type must be set per output: no guessing from the array's dtype
     raw = np.array([[0, 16383], [100, 200]], dtype=np.uint16)
-    colour = np.zeros((4, 4, 3), dtype=np.uint8)
 
-    raw_out = decode_image_from_bytes(encode_image_to_bytes(raw, None))
-    colour_out = decode_image_from_bytes(encode_image_to_bytes(colour))
-
-    assert raw_out.dtype == np.uint16
-    assert np.array_equal(raw_out, raw)
-    assert colour_out.dtype == np.uint8
-    assert colour_out.shape == colour.shape
+    with pytest.raises(ValueError, match="Unsupported image encoding: None"):
+        encode_image_to_bytes(raw, None)
 
 
 def test_encode_rejects_unknown_encoding():
@@ -281,3 +277,42 @@ def test_resolve_image_outputs_defaults_without_images_key():
     assert outputs[0]["rotate"] is None
     assert outputs[0]["crop"] is None
     assert outputs[0]["resize"] is None
+    assert outputs[0]["gamma"] is None
+
+
+def test_gamma_table_matches_the_inference_and_seal_width_table():
+    table = gamma_table(0.55)
+
+    # the brightening the Dunbia seal model was trained on
+    assert table[0] == 0 and table[255] == 255
+    assert table[23] == 68
+    assert table[128] == 175
+
+
+def test_gamma_brightens_every_channel_alongside_the_format():
+    img = np.zeros((2, 3, 3), dtype=np.uint8)
+    img[..., 0] = 23   # blue in BGR, red after BGR2RGB
+
+    out = apply_image_format(img, {"image_format": {"channel": "BGR2RGB"}, "gamma": 0.55})
+
+    assert out.shape == img.shape
+    assert (out[..., 2] == 68).all()
+    assert (out[..., :2] == 0).all()
+
+
+def test_no_gamma_leaves_pixels_alone():
+    img = np.arange(24, dtype=np.uint8).reshape(2, 4, 3)
+
+    assert np.array_equal(apply_image_format(img, {}), img)
+    assert np.array_equal(apply_image_format(img, {"gamma": None}), img)
+
+
+def test_parse_image_outputs_reads_an_optional_gamma():
+    outputs = parse_image_outputs(
+        [
+            {"rgb": {"topic_end": None}},
+            {"rgb_gamma": {"topic_end": "gamma", "gamma": 0.55}},
+        ]
+    )
+
+    assert [o["gamma"] for o in outputs] == [None, 0.55]

@@ -1,0 +1,23 @@
+name: ${PROJECT_NAME:-service}-act
+
+services:
+  act:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ${PROJECT_NAME:-service}-act:local
+
+    volumes:
+      # Mounted at the SAME path as on the host so any path act hands to the
+      # daemon resolves identically on both sides.
+      - ${REPO_ROOT:?run via ./run.sh}:${REPO_ROOT:?run via ./run.sh}
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./artifacts:/artifacts
+      - act-cache:/root/.cache/act
+
+    working_dir: ${REPO_ROOT:?run via ./run.sh}
+    init: true
+    tty: true
+
+volumes:
+  act-cache:
