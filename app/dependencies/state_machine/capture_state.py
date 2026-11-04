@@ -4,6 +4,7 @@ from .publish_state import PublishState
 from .get_best_frame_state import GetBestFrameState
 from time import sleep
 from datetime import datetime
+from dependencies.cycle_timing import mark, mark_frame_done
 class CaptureState(State):
     ''''''
     def __init__(self, 
@@ -26,6 +27,7 @@ class CaptureState(State):
         ''''''
         if self.exposure != None:
             self.__set_exposure(self.exposure)
+            mark(self.my_state_machine, "set exposure")
 
         image = self.__get_image(self.camera)
         self.images_captured.append(image)
@@ -45,6 +47,7 @@ class CaptureState(State):
 
     def exit(self):
         sleep(self.camera.frame_pace*2)
+        mark(self.my_state_machine, "pace sleep")
         self.images_captured = []
         return super().exit()
 
@@ -72,6 +75,22 @@ class CaptureState(State):
         )
 
     def __get_image(self,camera:Camera):
+        timing = getattr(self.my_state_machine, "timing", None)
+        camera.on_step = lambda name: mark(self.my_state_machine, name)
+        camera.on_frame_done = lambda: mark_frame_done(self.my_state_machine)
+        try:
+            image = self.__read_image(camera)
+        finally:
+            camera.on_step = camera.on_frame_done = None
+        if timing is not None and timing.frame_done is None:
+            mark_frame_done(self.my_state_machine)   # cameras without their own timing points
+        capture_time = datetime.now()
+        return {
+            "image": image,
+            "capture_time": capture_time
+        }
+
+    def __read_image(self, camera:Camera):
         if camera.capture_thread==None:
             image =  camera.capture_image()
         else:
@@ -79,8 +98,4 @@ class CaptureState(State):
                 camera.buffer,
                 camera.buffer_position
             )
-        capture_time = datetime.now()
-        return {
-            "image": image,
-            "capture_time": capture_time
-        }
+        return image

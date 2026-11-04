@@ -11,6 +11,7 @@ from ..image_strips import encode_strips
 from ..CameraLibrary.cameras import Camera
 from numpy import uint16, uint8, float32
 from sys import getsizeof
+from dependencies.cycle_timing import mark, report
 class PublishState(State):
     ''''''
     def __init__(self, state_machine,image, state_id = "Publish State"):
@@ -48,11 +49,13 @@ class PublishState(State):
             if encoding_type == uint8:
                 # scale to 8 bits over the whole frame, not strip by strip
                 variant = prepare_image_for_jpeg(variant)
+            mark(self.my_state_machine, "format")
             image_text = encode_strips(
                 variant,
                 output.get("strips", 1),
                 lambda piece: encode_image_to_bytes(piece, encoding_type),
             )
+            mark(self.my_state_machine, "encode")
 
             packet = {
                 "image": image_text,
@@ -70,6 +73,8 @@ class PublishState(State):
                 output.get("topic_end"),
             )
             self.my_state_machine.mqtt_client.publish(topic, packet)
+            mark(self.my_state_machine, "publish")
+        report(self.my_state_machine, "published")
 
         if self.is_archived:
             self.my_state_machine.change_state(

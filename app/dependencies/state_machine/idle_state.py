@@ -2,6 +2,7 @@ from .base_functions.state import State
 from .capture_state import CaptureState
 from dependencies.mqtt.topic import check_for_messages
 from time import sleep
+from dependencies.cycle_timing import start, mark
 
 class IdleState(State):
     '''A state to control the idle process'''
@@ -18,8 +19,10 @@ class IdleState(State):
         if message.get(self.my_state_machine.service_id) == 0: return
 
         self.my_state_machine.message_id = message.get("message_id")
+        start(self.my_state_machine, self.my_state_machine.service_id, message.get("message_id"))
         if self.camera.trigger_type == "software":
             sleep(self.__get_delay(message.get(self.my_state_machine.service_id)))
+            mark(self.my_state_machine, "delay")
             self.my_state_machine.change_state(
                 CaptureState(
                     self.my_state_machine,

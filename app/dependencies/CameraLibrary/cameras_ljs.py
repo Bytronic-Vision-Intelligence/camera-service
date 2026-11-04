@@ -472,11 +472,13 @@ the head is triggered from its TRG terminal and ``main.py`` drains
             if time.monotonic() >= deadline:
                 raise TimeoutError("LJ-S head did not report TRG_READY before timeout")
             time.sleep(0.01)
-            
+        self._step("wait ready")
+
         res = LJSwrap.LJS8IF_Trigger(self.device_id)
         if res != 0:
             # e.g. 0x80A0 if the laser isn't enabled -- see ControlLaser(1) in connect.
             raise RuntimeError(f"LJS8IF_Trigger failed: {_hex(res)}")
+        self._step("trigger")
 
         remaining = max(deadline - time.monotonic(), 0.1)
         
@@ -484,13 +486,16 @@ the head is triggered from its TRG terminal and ``main.py`` drains
             item = self._raw_queue.get(timeout=remaining)
         except Empty:
             raise TimeoutError("Timed out waiting for LJ-S profile data") from None
-        
+        self._frame_done()   # scan finished and its data received: the lights may come on
+
         if isinstance(item, _StreamStopped):
             raise RuntimeError("LJ-S high-speed data communication was stopped")
         if isinstance(item, BaseException):
             raise item
-        
-        return self._decode(item)
+
+        height_mm = self._decode(item)
+        self._step("to mm")
+        return height_mm
 
     def get_attention_status(self) -> int:
         """Raw LJS8IF_GetAttentionStatus bitmask (_TRG_READY / _SCMD_READY / _MEM_FULL)."""
