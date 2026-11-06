@@ -1,7 +1,9 @@
+import base64
 from types import SimpleNamespace
 
 import numpy as np
 
+from dependencies.image_functions import decode_image_from_bytes
 from dependencies.state_machine.publish_state import PublishState
 
 PLANCK = {"planck_r": 342259.0, "planck_b": 1428.0, "planck_f": 1.0, "planck_o": 406.446}
@@ -74,3 +76,37 @@ def test_the_cameras_metadata_is_not_changed():
 def test_no_metadata_without_planck_constants_or_camera_metadata():
     packets = publish(fake_camera("dummy"))
     assert "metadata" not in packets[0]
+
+
+def publish_outputs(image_outputs, image):
+    machine = FakeStateMachine(fake_camera("dummy"))
+    machine.image_outputs = image_outputs
+    state = PublishState(machine, {"image": image, "capture_time": "2026-11-03 10:00:00"})
+    state.enter()
+    state.tick()
+    packets = [packet for _topic, packet in machine.mqtt_client.published]
+    return packets
+
+
+def test_tiled_png_output_publishes_its_strips_top_to_bottom():
+    image = np.random.default_rng(0).integers(0, 256, (7, 5, 3), dtype=np.uint8)
+
+    packets = publish_outputs([{"id": "png", "image_type": "uint16", "topic_end": "png", "tiles": 3}], image)
+
+    strips = packets[0]["image"]
+    assert isinstance(strips, list) and len(strips) == 3
+    out = np.vstack([decode_image_from_bytes(base64.b64decode(strip)) for strip in strips])
+    assert np.array_equal(out, image)
+
+
+def test_png_output_without_tiles_publishes_one_string():
+    packets = publish(fake_camera("dummy"))
+    assert isinstance(packets[0]["image"], str)
+
+
+def test_tiles_apply_to_png_outputs_only():
+    image = np.zeros((8, 8, 3), dtype=np.uint8)
+
+    packets = publish_outputs([{"id": "jpg", "image_type": "uint8", "topic_end": None, "tiles": 6}], image)
+
+    assert isinstance(packets[0]["image"], str)
