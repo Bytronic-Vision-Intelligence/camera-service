@@ -1,9 +1,11 @@
 import base64
+import json
 from types import SimpleNamespace
 
 import numpy as np
+import pytest
 
-from dependencies.image_functions import decode_image_from_bytes
+from dependencies.image_functions import BINARY_PACKET_MAGIC, decode_image_from_bytes
 from dependencies.state_machine.publish_state import PublishState
 
 PLANCK = {"planck_r": 342259.0, "planck_b": 1428.0, "planck_f": 1.0, "planck_o": 406.446}
@@ -110,3 +112,55 @@ def test_tiles_apply_to_png_outputs_only():
     packets = publish_outputs([{"id": "jpg", "image_type": "uint8", "topic_end": None, "tiles": 6}], image)
 
     assert isinstance(packets[0]["image"], str)
+
+
+def unpack(payload: bytes) -> dict:
+    """What a receiver does with a binary packet: the JSON header, the image bytes cut by length."""
+    assert payload[:4] == BINARY_PACKET_MAGIC
+    size = int.from_bytes(payload[4:8], "big")
+    packet = json.loads(payload[8:8 + size])
+    start = 8 + size
+    sizes = packet["image"]
+    if isinstance(sizes, list):
+        parts = []
+        for n in sizes:
+            parts.append(payload[start:start + n])
+            start += n
+        packet["image"] = parts
+    else:
+        packet["image"] = payload[start:start + sizes]
+        start += sizes
+    assert start == len(payload)
+    return packet
+
+
+def test_binary_tiled_png_carries_the_strips_as_bytes():
+    image = np.random.default_rng(0).integers(0, 256, (7, 5, 3), dtype=np.uint8)
+
+    packets = publish_outputs([{"id": "png", "image_type": "uint16", "topic_end": "png", "tiles": 3,
+                                "payload_format": "binary"}], image)
+
+    assert isinstance(packets[0], bytes)
+    packet = unpack(packets[0])
+    assert len(packet["image"]) == 3
+    out = np.vstack([decode_image_from_bytes(strip) for strip in packet["image"]])
+    assert np.array_equal(out, image)
+    assert packet["image_id"] == "png" and packet["date_time"] == "2026-11-03 10:00:00"
+
+
+def test_binary_packet_has_the_same_fields_as_the_json_one():
+    image = np.random.default_rng(1).integers(0, 256, (6, 4, 3), dtype=np.uint8)
+    outputs = [{"id": "jpg", "image_type": "uint8", "topic_end": None}]
+
+    as_json = publish_outputs(outputs, image)[0]
+    as_binary = unpack(publish_outputs([dict(outputs[0], payload_format="binary")], image)[0])
+
+    assert as_binary["image"] == base64.b64decode(as_json["image"])
+    assert {k: v for k, v in as_binary.items() if k != "image"} == {k: v for k, v in as_json.items() if k != "image"}
+
+
+def test_binary_packet_is_not_utf8_text():
+    image = np.zeros((4, 4, 3), dtype=np.uint8)
+    payload = publish_outputs([{"id": "jpg", "image_type": "uint8", "payload_format": "binary"}], image)[0]
+    with pytest.raises(UnicodeDecodeError):
+        payload.decode("utf-8")

@@ -74,6 +74,9 @@ service:
         # gamma: 0.55               # optional, 8-bit only, before image_format: out = 255 * (in/255) ** gamma.
         # tiles: 6                  # optional, PNG (image_type: uint16) only: "image" is a list of 6 strips, top to
         #                           # bottom, encoded side by side (faster). Every subscriber must decode the list.
+        # payload_format: binary    # optional, default json (base64 image in JSON). binary: b"\xffIMG", 4-byte
+        #                           # header length, JSON header ("image" = byte length, or list of strip lengths),
+        #                           # then the image bytes; no base64. Every subscriber must read binary packets.
 
   camera_settings: {}
   lights: {}

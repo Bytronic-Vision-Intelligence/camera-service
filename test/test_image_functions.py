@@ -347,3 +347,20 @@ def test_parse_image_outputs_reads_optional_tiles():
     )
 
     assert [o["tiles"] for o in outputs] == [None, 6]
+
+
+def test_parse_image_outputs_reads_payload_format_json_by_default():
+    outputs = parse_image_outputs(
+        [
+            {"rgb": {"topic_end": None}},
+            {"rgb_png": {"topic_end": "png", "payload_format": "Binary"}},
+        ]
+    )
+
+    assert [o["payload_format"] for o in outputs] == ["json", "binary"]
+    assert resolve_image_outputs({})[0]["payload_format"] == "json"
+
+
+def test_parse_image_outputs_refuses_an_unknown_payload_format():
+    with pytest.raises(ValueError, match="payload_format"):
+        parse_image_outputs([{"rgb": {"payload_format": "bytes"}}])
