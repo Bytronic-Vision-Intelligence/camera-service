@@ -1,14 +1,33 @@
 import json
 import numpy as np
 import cv2
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 from time import localtime, strftime
+
+# Faster drop-ins for the multi-MB image packets when installed (optional, not in
+# requirements.txt): the same base64 text and the same JSON packet. A 6.6 MB PNG packet took
+# 27 ms to base64 + serialise with the standard library and 5.5 ms with these (dev laptop,
+# 04/11/2026). A binary packet (payload_format: binary) needs neither.
+try:
+    from pybase64 import b64encode
+except ImportError:
+    from base64 import b64encode
+try:
+    import orjson
+except ImportError:
+    orjson = None
 
 #: JPEG byte limit; larger images are scaled down until they fit. None = no limit.
 MAX_IMG_SIZE: int | None = None
 
 #: Thread pools for encode_png_tiles, one per tile count, kept between frames.
 _TILE_POOLS: dict[int, ThreadPoolExecutor] = {}
+
+#: Starts tiled PNG encodes in the background (see start_png_tiles).
+_PNG_STARTER = ThreadPoolExecutor(max_workers=1, thread_name_prefix="png_start")
+
+#: Channel conversions that only reorder the channels: gamma gives the same pixels before or after.
+_CHANNEL_SWAPS = ("BGR2RGB", "RGB2BGR")
 
 #: First bytes of a binary image packet (output `payload_format: binary`). 0xff never starts
 #: UTF-8 text, so the receiver's text decode fails at once and the payload stays bytes.
@@ -93,6 +112,64 @@ def encode_png_tiles(image: np.ndarray, tiles: int) -> list[bytes]:
     strips = np.array_split(image, tiles, axis=0)
     parts = list(pool.map(lambda strip: encode_image_to_bytes(strip, np.uint16), strips))
     return parts
+
+
+def png_tiles(output_settings) -> int:
+    """How many strips an output is encoded in: its ``tiles`` for a PNG output (image_type uint16),
+    1 otherwise (JPEG strips would change pixels)."""
+    tiles = int(output_settings.get("tiles") or 1)
+    out = tiles if "uint16" in str(output_settings.get("image_type")) else 1
+    return out
+
+
+def start_png_tiles(image: np.ndarray, tiles: int) -> Future:
+    """encode_png_tiles in the background; ``.result()`` gives the strips. Lets a tiled PNG encode
+    while the outputs before it are encoded and published: on Line 4 the PNG started only once
+    the pack model's JPEG was out."""
+    out = _PNG_STARTER.submit(encode_png_tiles, image, tiles)
+    return out
+
+
+def format_output(image: np.ndarray, output_settings, formatted: dict) -> np.ndarray:
+    """apply_image_format, sharing the work between the outputs of one frame.
+
+    Outputs whose rotate / crop / resize / channel swap are the same share one pass (kept in
+    ``formatted``, a dict per frame); an output with ``gamma`` gets the gamma table on that result.
+    The same pixels as apply_image_format: gamma is one table for every channel, so it gives the
+    same values before or after a channel swap. Other formats (grey, colour map) are formatted on
+    their own, as before.
+    """
+    image_format = output_settings.get("image_format")
+    shareable = image_format is None or (isinstance(image_format, dict) and list(image_format) == ["channel"]
+                                         and str(image_format["channel"]).strip() in _CHANNEL_SWAPS)
+    if not shareable:
+        return apply_image_format(image, output_settings)
+    key = repr([output_settings.get(name) for name in ("rotate", "crop", "resize", "image_format")])
+    if key not in formatted:
+        formatted[key] = apply_image_format(image, dict(output_settings, gamma=None))
+    gamma = output_settings.get("gamma")
+    out = formatted[key] if gamma is None else cv2.LUT(formatted[key], gamma_table(gamma))
+    return out
+
+
+def base64_text(data: bytes) -> str:
+    """Base64 of encoded image bytes, as packet text."""
+    out = b64encode(data).decode("ascii")
+    return out
+
+
+def packet_bytes(packet: dict):
+    """The packet as JSON bytes for MQTT, through orjson when it is installed (the same JSON as
+    mqtt_client writes, no spaces; a NaN setting would be written as null instead of NaN). Without
+    orjson, or for a packet orjson cannot serialise (e.g. a numpy number in camera_details), the
+    dict itself, which mqtt_client serialises as before."""
+    if orjson is None:
+        return packet
+    try:
+        out = orjson.dumps(packet)
+    except TypeError:
+        return packet
+    return out
 
 
 def image_encoding(image: np.ndarray) -> str:

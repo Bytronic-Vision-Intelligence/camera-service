@@ -349,6 +349,69 @@ def test_parse_image_outputs_reads_optional_tiles():
     assert [o["tiles"] for o in outputs] == [None, 6]
 
 
+def test_format_output_gives_the_same_pixels_as_apply_image_format():
+    raw = np.random.default_rng(1).integers(0, 256, (9, 14, 3), dtype=np.uint8)
+    outputs = [
+        {"rotate": -90, "gamma": 0.55, "image_format": {"channel": "BGR2RGB"}},
+        {"rotate": -90, "image_format": {"channel": "BGR2RGB"}},
+        {"rotate": -90, "image_format": {"channel": "BGR2RGB"}, "gamma": 0.8},
+        {"gamma": 0.55, "crop": [{"x": [0.1, 0.9]}], "resize": 0.5},
+        {"gamma": 0.55, "image_format": {"channel": "BGR2GRAY"}},
+        {},
+    ]
+    formatted = {}
+
+    for output in outputs:
+        assert np.array_equal(image_functions.format_output(raw, output, formatted), apply_image_format(raw, output))
+    assert len(formatted) == 3   # the three rotate + BGR2RGB outputs shared one pass; grey is not shared
+
+
+def test_png_tiles_counts_strips_for_png_outputs_only():
+    assert image_functions.png_tiles({"image_type": "uint16", "tiles": 8}) == 8
+    assert image_functions.png_tiles({"image_type": "uint16"}) == 1
+    assert image_functions.png_tiles({"image_type": "uint8", "tiles": 8}) == 1
+
+
+def test_start_png_tiles_gives_the_same_strips():
+    img = np.random.default_rng(2).integers(0, 256, (40, 9, 3), dtype=np.uint8)
+
+    assert image_functions.start_png_tiles(img, 4).result(timeout=10) == encode_png_tiles(img, 4)
+
+
+def test_base64_text_and_packet_bytes_match_the_standard_library():
+    import base64
+    import json
+    data = bytes(range(256)) * 50
+    packet = {"image": [image_functions.base64_text(data)] * 2, "date_time": "2026-11-04 16:37:54.570802",
+              "camera_details": {"exposure_time_us": 1500, "gain": 1.5, "camera_ip": None}}
+
+    assert packet["image"][0] == base64.b64encode(data).decode("ascii")
+    out = image_functions.packet_bytes(packet)
+    assert json.loads(out) == packet if isinstance(out, bytes) else out is packet
+
+
+def test_packet_bytes_leaves_what_orjson_cannot_serialise_to_mqtt_client():
+    packet = {"image": "QUJD", "camera_details": {"gain": np.float32(1.5)}}
+
+    assert image_functions.packet_bytes(packet) is packet
+
+
+def test_without_pybase64_and_orjson_packets_are_built_as_before(monkeypatch):
+    import base64
+    import importlib
+    import sys
+    monkeypatch.setitem(sys.modules, "pybase64", None)   # import fails as if not installed
+    monkeypatch.setitem(sys.modules, "orjson", None)
+    try:
+        plain = importlib.reload(image_functions)
+        packet = {"image": plain.base64_text(b"abc"), "date_time": "x"}
+        assert packet["image"] == base64.b64encode(b"abc").decode("ascii")
+        assert plain.packet_bytes(packet) is packet   # mqtt_client serialises the dict, as before
+    finally:
+        monkeypatch.undo()
+        importlib.reload(image_functions)
+
+
 def test_parse_image_outputs_reads_payload_format_json_by_default():
     outputs = parse_image_outputs(
         [

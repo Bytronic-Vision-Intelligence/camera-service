@@ -1,14 +1,16 @@
 from .base_functions.state import State
 from .archive_state import ArchiveState
 from ..image_functions import (
-    apply_image_format,
+    base64_text,
     build_image_topic,
     encode_image_to_bytes,
-    encode_png_tiles,
+    format_output,
     image_encoding,
     pack_binary_packet,
+    packet_bytes,
+    png_tiles,
+    start_png_tiles,
 )
-import base64
 from ..CameraLibrary.cameras import Camera
 from numpy import uint16, uint8, float32 ##, unique
 from sys import getsizeof
@@ -47,15 +49,25 @@ class PublishState(State):
             camera_details["planck_constants"] = self.planck_constants
             metadata["planck_constants"] = self.planck_constants
         # print(f"image has the following values {unique(image_details)}")
-        for output in self.my_state_machine.image_outputs:
-            variant = apply_image_format(self.image.get("image"), output)
+        outputs = self.my_state_machine.image_outputs
+        frame = self.image.get("image")
+        formatted = {}   # outputs differing only in gamma share one rotate / crop / resize / channel pass
+        started = {}     # tiled PNGs already encoding in the background, by output index
+        for i, output in enumerate(outputs):
+            variant = format_output(frame, output, formatted)
             image_type = self.__get_type(output.get("image_type"))
-            tiles = int(output.get("tiles") or 1)
-            if image_type is uint16 and tiles > 1:
+            if png_tiles(output) > 1:
                 # PNG in strips encoded side by side: the list of strips, top to bottom
-                image_bytes = encode_png_tiles(variant, tiles)
+                strips = started.pop(i) if i in started else start_png_tiles(variant, png_tiles(output))
+                image_bytes = strips.result()
             else:
                 image_bytes = encode_image_to_bytes(variant, image_type)
+            # This output is encoded: the tiled PNGs listed after it start now and encode while it is
+            # published (Line 4: seal width's PNG used to start only once the pack model's JPEG was out).
+            # Not earlier, so they do not slow down this output's own encode.
+            for j in range(i + 1, len(outputs)):
+                if png_tiles(outputs[j]) > 1 and j not in started:
+                    started[j] = start_png_tiles(format_output(frame, outputs[j], formatted), png_tiles(outputs[j]))
 
             packet = {
                 "date_time": str(self.image.get("capture_time")),
@@ -71,10 +83,10 @@ class PublishState(State):
                 packet_size = len(payload)/(1024 * 1024)
             else:
                 if isinstance(image_bytes, list):
-                    image_field = [base64.b64encode(part).decode("ascii") for part in image_bytes]
+                    image_field = [base64_text(part) for part in image_bytes]
                 else:
-                    image_field = base64.b64encode(image_bytes).decode("ascii")
-                payload = {"image": image_field, **packet}
+                    image_field = base64_text(image_bytes)
+                payload = packet_bytes({"image": image_field, **packet})   # orjson bytes, or the dict
                 packet_size = sum(getsizeof(part) for part in (image_field if isinstance(image_field, list)
                                                                else [image_field]))/(1024 * 1024)
             print(f"Info : packet is {packet_size} MB")

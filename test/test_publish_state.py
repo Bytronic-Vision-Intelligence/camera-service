@@ -2,10 +2,16 @@ import base64
 import json
 from types import SimpleNamespace
 
+import cv2
 import numpy as np
 import pytest
 
-from dependencies.image_functions import BINARY_PACKET_MAGIC, decode_image_from_bytes
+from dependencies.image_functions import (
+    BINARY_PACKET_MAGIC,
+    apply_image_format,
+    decode_image_from_bytes,
+    encode_image_to_bytes,
+)
 from dependencies.state_machine.publish_state import PublishState
 
 PLANCK = {"planck_r": 342259.0, "planck_b": 1428.0, "planck_f": 1.0, "planck_o": 406.446}
@@ -39,13 +45,22 @@ def fake_camera(camera_type, camera_settings=None, planck_constants=None):
     return camera
 
 
+def as_dict(packet):
+    """A published packet as the receiver sees it: JSON bytes (orjson installed) or the dict.
+    A binary packet stays bytes (see unpack)."""
+    if isinstance(packet, bytes) and packet[:4] == BINARY_PACKET_MAGIC:
+        return packet
+    out = packet if isinstance(packet, dict) else json.loads(packet)
+    return out
+
+
 def publish(camera, metadata=None):
     machine = FakeStateMachine(camera)
     frame = {"image": np.zeros((4, 4), dtype=np.uint16), "capture_time": "2026-10-30 15:00:00", "metadata": metadata}
     state = PublishState(machine, frame)
     state.enter()
     state.tick()
-    packets = [packet for _topic, packet in machine.mqtt_client.published]
+    packets = [as_dict(packet) for _topic, packet in machine.mqtt_client.published]
     return packets
 
 
@@ -80,13 +95,15 @@ def test_no_metadata_without_planck_constants_or_camera_metadata():
     assert "metadata" not in packets[0]
 
 
-def publish_outputs(image_outputs, image):
+def publish_outputs(image_outputs, image, topics=None):
     machine = FakeStateMachine(fake_camera("dummy"))
     machine.image_outputs = image_outputs
     state = PublishState(machine, {"image": image, "capture_time": "2026-11-03 10:00:00"})
     state.enter()
     state.tick()
-    packets = [packet for _topic, packet in machine.mqtt_client.published]
+    packets = [as_dict(packet) for _topic, packet in machine.mqtt_client.published]
+    if topics is not None:
+        topics.extend(topic for topic, _packet in machine.mqtt_client.published)
     return packets
 
 
@@ -157,6 +174,58 @@ def test_binary_packet_has_the_same_fields_as_the_json_one():
 
     assert as_binary["image"] == base64.b64decode(as_json["image"])
     assert {k: v for k, v in as_binary.items() if k != "image"} == {k: v for k, v in as_json.items() if k != "image"}
+
+
+LINE4_OUTPUTS = [   # config_dunbia_seal_width.yaml: the pack model's JPEG, seal width's tiled PNG, the UI copy
+    {"id": "rgb_gamma", "image_type": "uint8", "rotate": -90, "image_format": {"channel": "BGR2RGB"},
+     "gamma": 0.55, "topic_end": "gamma"},
+    {"id": "rgb_png", "image_type": "uint16", "rotate": -90, "image_format": {"channel": "BGR2RGB"},
+     "tiles": 3, "topic_end": "png"},
+    {"id": "rgb", "image_type": "uint8", "rotate": -90, "image_format": {"channel": "BGR2RGB"}, "topic_end": None},
+]
+
+
+def test_shared_formatting_publishes_the_same_images_in_the_same_order():
+    raw = np.random.default_rng(5).integers(0, 256, (12, 20, 3), dtype=np.uint8)
+    topics = []
+
+    packets = publish_outputs(LINE4_OUTPUTS, raw, topics)
+
+    assert topics == ["project/camera/thermal_1/image/gamma", "project/camera/thermal_1/image/png",
+                      "project/camera/thermal_1/image"]
+    for output, packet in zip(LINE4_OUTPUTS, packets):
+        expected = apply_image_format(raw, output)   # each output formatted on its own, as before
+        if output["id"] == "rgb_png":
+            strips = [decode_image_from_bytes(base64.b64decode(s)) for s in packet["image"]]
+            assert np.array_equal(np.vstack(strips), expected)
+        else:   # the same JPEG bytes as encoding that output's own formatted image
+            assert base64.b64decode(packet["image"]) == encode_image_to_bytes(expected, np.uint8)
+
+
+def test_line4_outputs_with_a_binary_png_publish_the_same_pixels():
+    raw = np.random.default_rng(9).integers(0, 256, (12, 20, 3), dtype=np.uint8)
+    outputs = [dict(o, payload_format="binary") if o["id"] == "rgb_png" else o for o in LINE4_OUTPUTS]
+
+    packets = publish_outputs(outputs, raw)
+
+    assert isinstance(packets[0], dict) and isinstance(packets[2], dict)   # the JPEGs stay JSON
+    png = unpack(packets[1])
+    assert np.array_equal(np.vstack([decode_image_from_bytes(s) for s in png["image"]]),
+                          apply_image_format(raw, outputs[1]))
+
+
+def test_a_grey_output_is_not_shared_with_a_colour_one():
+    raw = np.random.default_rng(6).integers(0, 256, (12, 20, 3), dtype=np.uint8)
+    outputs = [{"id": "grey", "image_type": "uint8", "gamma": 0.55, "image_format": {"channel": "BGR2GRAY"},
+                "topic_end": "grey"},
+               {"id": "colour", "image_type": "uint8", "gamma": 0.55, "topic_end": None}]
+
+    packets = publish_outputs(outputs, raw)
+
+    for output, packet in zip(outputs, packets):
+        assert base64.b64decode(packet["image"]) == encode_image_to_bytes(apply_image_format(raw, output), np.uint8)
+    grey = cv2.imdecode(np.frombuffer(base64.b64decode(packets[0]["image"]), np.uint8), cv2.IMREAD_UNCHANGED)
+    assert grey.ndim == 2
 
 
 def test_binary_packet_is_not_utf8_text():
