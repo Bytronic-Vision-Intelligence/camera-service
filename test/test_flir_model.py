@@ -74,12 +74,8 @@ def test_ax5_configure_does_not_write_a70_nodes(monkeypatch):
 
     camera._configure_raw_pixel_format(object())
 
-    names = [name for name, _entry in calls]
-    assert "IRFormat" not in names
-    assert ("CMOSBitDepth", "bit14bit") in calls
-    assert ("PixelFormat", "Mono14") in calls
-    assert ("TemperatureLinearMode", "On") in calls
-    assert ("TemperatureLinearResolution", "High") in calls
+    assert calls == []
+    assert camera._flir_model == "ax5"
     assert camera._mask_mono16_msbs is False
 
 

@@ -43,9 +43,19 @@ class CaptureState(State):
         )
 
     def exit(self):
-        sleep(self.camera.frame_pace*2)
+        # The frame is already in hand. frame_pace is 1/60, so two periods
+        # hold the publish for ~33 ms. Hardware single-frame does not need that.
+        if not self._hardware_single_frame():
+            sleep(self.camera.frame_pace * 2)
         self.images_captured = []
         return super().exit()
+
+    def _hardware_single_frame(self) -> bool:
+        camera = getattr(self, "camera", None) or self.my_state_machine.camera
+        trigger = str(getattr(camera, "trigger_type", "") or "").strip().lower()
+        capture = str(getattr(camera, "capture_type", "") or "").strip().lower()
+        burst = getattr(self.my_state_machine, "burst_length", 1)
+        return trigger == "hardware" and capture == "single" and burst == 1
 
     def __set_exposure(self, exposure):
         exposure = self.exposure

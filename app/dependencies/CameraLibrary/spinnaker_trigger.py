@@ -59,6 +59,7 @@ class SpinnakerHardwareTrigger:
         self.config = config
         self.mode = "off"  # off | native | gpio_poll
         self._last_line_status: Optional[bool] = None
+        self._leave_device_settings = False
 
     @property
     def enabled(self) -> bool:
@@ -68,9 +69,22 @@ class SpinnakerHardwareTrigger:
     def uses_gpio_poll(self) -> bool:
         return self.mode == "gpio_poll"
 
-    def configure(self, nodemap=None) -> None:
+    def configure(self, nodemap=None, *, camera_model: str | None = None) -> None:
         if nodemap is None:
             nodemap = self._cam.GetNodeMap()
+
+        # AX5 settings (PLC route, acquisition mode, pixel format) are applied
+        # outside this service and must be left as they are.
+        self._leave_device_settings = str(camera_model or "").strip().lower() == "ax5"
+        if self._leave_device_settings:
+            if self.config.enabled:
+                logger.info("AX5 leaving camera settings unchanged; polling LineStatus")
+                self.mode = "gpio_poll"
+                self.sample_idle_line()
+            else:
+                logger.info("AX5 leaving camera settings unchanged")
+                self.mode = "off"
+            return
 
         if not self.config.enabled:
             self.mode = "off"
@@ -107,6 +121,8 @@ class SpinnakerHardwareTrigger:
         nodemap = self._cam.GetNodeMap()
         status = PySpin.CBooleanPtr(nodemap.GetNode("LineStatus"))
         if not PySpin.IsAvailable(status) or not PySpin.IsReadable(status):
+            if self._leave_device_settings:
+                raise RuntimeError("LineStatus is not readable on this camera")
             self._select_line(nodemap, self.config.source)
             status = PySpin.CBooleanPtr(nodemap.GetNode("LineStatus"))
             if not PySpin.IsAvailable(status) or not PySpin.IsReadable(status):

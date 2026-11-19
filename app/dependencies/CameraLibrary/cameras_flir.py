@@ -82,6 +82,18 @@ def _set_bool_node(nodemap, node_name: str, value: bool) -> bool:
         return False
 
 
+def _read_enum_symbolic(nodemap, node_name: str):
+    """Return the current symbolic value of an enumeration node, or None."""
+    try:
+        node = PySpin.CEnumerationPtr(nodemap.GetNode(node_name))
+        if not PySpin.IsAvailable(node) or not PySpin.IsReadable(node):
+            return None
+        return str(PySpin.CEnumEntryPtr(node.GetCurrentEntry()).GetSymbolic())
+    except Exception:
+        logger.debug("Failed reading enum %s", node_name, exc_info=True)
+        return None
+
+
 def _read_numeric_node(nodemap, node_name: str):
     """Read a GenICam float or integer node. Returns None if it cannot be read."""
     try:
@@ -125,11 +137,31 @@ class FlirCamera(Camera):
         self._flir_model = "a70"
         self.planck_constants = {}
 
+    def _resolved_camera_model(self) -> str:
+        """Model from ``camera_settings``. Unknown or missing values are ax5."""
+        try:
+            cfg = self.camera_settings or {}
+        except Exception:
+            cfg = {}
+        if not isinstance(cfg, dict):
+            cfg = {}
+        model = str(cfg.get("camera_model") or "ax5").strip().lower()
+        try:
+            flir_model_profile(model)
+        except ValueError:
+            logger.warning(
+                "Invalid FLIR camera_model=%r; falling back to ax5",
+                cfg.get("camera_model"),
+            )
+            model = "ax5"
+        return model
+
     def _configure_raw_pixel_format(self, nodemap) -> None:
         """Apply the GenICam setup for ``camera_settings.camera_model``.
 
         Missing ``camera_model`` stays on the AX5 path. ``a70`` never writes
-        AX5 nodes, and ``ax5`` never writes ``IRFormat``.
+        AX5 nodes. An AX5 is left as already configured; this service does not
+        write its GenICam nodes.
         """
         try:
             cfg = self.camera_settings or {}
@@ -138,16 +170,8 @@ class FlirCamera(Camera):
         if not isinstance(cfg, dict):
             cfg = {}
 
-        model = str(cfg.get("camera_model") or "ax5").strip().lower()
-        try:
-            profile = flir_model_profile(model)
-        except ValueError:
-            logger.warning(
-                "Invalid FLIR camera_model=%r; falling back to ax5",
-                cfg.get("camera_model"),
-            )
-            model = "ax5"
-            profile = flir_model_profile(model)
+        model = self._resolved_camera_model()
+        profile = flir_model_profile(model)
         self._flir_model = model
         logger.info("Configuring FLIR model=%s", model)
 
@@ -156,33 +180,18 @@ class FlirCamera(Camera):
         else:
             self._configure_ax5(nodemap, cfg, profile)
 
-    def _configure_ax5(self, nodemap, cfg: dict, profile: dict) -> None:
-        cmos_depth = str(
-            cfg.get("cmos_bit_depth") or profile["default_cmos_bit_depth"]
-        )
-        # CMOS bit depth must match PixelFormat when switching 8 <-> 14 bit.
-        _set_enum_node(nodemap, "CMOSBitDepth", cmos_depth)
+    def _configure_ax5(self, nodemap, _cfg: dict, _profile: dict) -> None:
+        """Leave AX5 GenICam settings as configured outside this service.
 
-        pixel_format = _apply_pixel_format(
-            nodemap,
-            str(cfg.get("pixel_format") or profile["default_pixel_format"]),
-            profile["pixel_format_fallbacks"],
-        )
-        # AX5 Mono16 packs a 14-bit payload with bits 14–15 stuck high.
+        The Mono16 mask is a host-side fix, chosen by reading the current
+        PixelFormat. Nothing is written to the camera.
+        """
+        pixel_format = _read_enum_symbolic(nodemap, "PixelFormat")
         self._mask_mono16_msbs = pixel_format == "Mono16"
-
-        enabled = cfg.get("temperature_linear_mode") is True
-        # AX5 exposes this as an On/Off enum. A boolean write is rejected
-        # ("not writable") and the stream stays raw signal.
-        linear_entry = "On" if enabled else "Off"
-        if not _set_enum_node(nodemap, "TemperatureLinearMode", linear_entry):
-            _set_bool_node(nodemap, "TemperatureLinearMode", enabled)
-
-        resolution = str(
-            cfg.get("temperature_linear_resolution")
-            or profile["default_temperature_linear_resolution"]
+        logger.info(
+            "AX5 leaving camera settings unchanged (PixelFormat=%s)",
+            pixel_format,
         )
-        _set_enum_node(nodemap, "TemperatureLinearResolution", resolution)
 
     def _configure_a70(self, nodemap, cfg: dict, profile: dict) -> None:
         _apply_pixel_format(
@@ -282,18 +291,20 @@ class FlirCamera(Camera):
                     e,
                 )
 
-            acquisition_mode = PySpin.CEnumerationPtr(nodemap.GetNode("AcquisitionMode"))
-            if PySpin.IsAvailable(acquisition_mode) and PySpin.IsWritable(acquisition_mode):
-                continuous = PySpin.CEnumEntryPtr(acquisition_mode.GetEntryByName("Continuous"))
-                if PySpin.IsAvailable(continuous) and PySpin.IsReadable(continuous):
-                    acquisition_mode.SetIntValue(continuous.GetValue())
+            self._flir_model = self._resolved_camera_model()
+            if self._flir_model != "ax5":
+                acquisition_mode = PySpin.CEnumerationPtr(nodemap.GetNode("AcquisitionMode"))
+                if PySpin.IsAvailable(acquisition_mode) and PySpin.IsWritable(acquisition_mode):
+                    continuous = PySpin.CEnumEntryPtr(acquisition_mode.GetEntryByName("Continuous"))
+                    if PySpin.IsAvailable(continuous) and PySpin.IsReadable(continuous):
+                        acquisition_mode.SetIntValue(continuous.GetValue())
 
             self._configure_raw_pixel_format(nodemap)
             self._read_planck_constants(nodemap)
 
             trigger_cfg = HardwareTriggerConfig.from_app_config(self.trigger_config)
             self._trigger = SpinnakerHardwareTrigger(self.cam, trigger_cfg)
-            self._trigger.configure(nodemap)
+            self._trigger.configure(nodemap, camera_model=self._flir_model)
 
             self.processor = PySpin.ImageProcessor()
             self.processor.SetColorProcessing(
@@ -301,7 +312,10 @@ class FlirCamera(Camera):
             )
             self.pixel_format_out = PySpin.PixelFormat_BGR8
 
-            self.cam.BeginAcquisition()
+            if self._flir_model == "ax5" and self.cam.IsStreaming():
+                logger.info("AX5 already streaming; leaving acquisition as configured")
+            else:
+                self.cam.BeginAcquisition()
 
             while True:
                 if self.cam.IsStreaming():
@@ -329,6 +343,27 @@ class FlirCamera(Camera):
         except Exception:
             logger.debug("stop_acquisition failed", exc_info=True)
 
+    def _rearm_ax5_acquisition(self) -> None:
+        """Arm the next AX5 frame without changing any camera settings.
+
+        SingleFrame acquisition, as set in GEVPlayer, completes after one
+        image. The following GetNextImage then waits until timeout (-1011)
+        unless acquisition is started again. This is the same action as
+        pressing Play.
+        """
+        if self._flir_model != "ax5" or self.cam is None:
+            return
+        try:
+            if self.cam.IsStreaming():
+                self.cam.EndAcquisition()
+        except Exception:
+            logger.debug("AX5 EndAcquisition before re-arm failed", exc_info=True)
+        try:
+            self.cam.BeginAcquisition()
+            logger.info("AX5 acquisition re-armed")
+        except Exception:
+            logger.error("Failed to re-arm AX5 acquisition", exc_info=True)
+
     def capture_image(self, camera=None, timeout_ms: int = 5000, is_converted: bool = False) -> np.ndarray:
         if camera is None:
             camera = self.cam
@@ -338,6 +373,7 @@ class FlirCamera(Camera):
         try:
             grab_result = camera.GetNextImage(timeout_ms)
         except PySpin.SpinnakerException as e:
+            self._rearm_ax5_acquisition()
             native_hw = (
                 self._trigger is not None
                 and self._trigger.mode == "native"
@@ -348,6 +384,7 @@ class FlirCamera(Camera):
             logger.error("GetNextImage raised an exception", exc_info=True)
             raise RuntimeError("Failed to grab image from FLIR camera") from e
         except Exception as e:
+            self._rearm_ax5_acquisition()
             logger.error("GetNextImage raised an exception", exc_info=True)
             raise RuntimeError("Failed to grab image from FLIR camera") from e
 
@@ -381,6 +418,7 @@ class FlirCamera(Camera):
                 grab_result.Release()
             except Exception:
                 logger.error("Failed to release FLIR image buffer", exc_info=True)
+            self._rearm_ax5_acquisition()
 
     def wait_for_frame(
         self,

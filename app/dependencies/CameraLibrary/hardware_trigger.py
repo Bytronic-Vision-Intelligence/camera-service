@@ -134,11 +134,12 @@ def wait_for_gpio_edge_frames(
             time.sleep(0.05)
             continue
 
+        if previous and not current:
+            print(f"Info : GPIO falling edge ({previous} -> {current})")
+
         if edge_detected(previous, current, config.activation):
-            logger.info(
-                "GPIO edge detected (%s -> %s); capturing frame",
-                previous,
-                current,
+            print(
+                f"Info : GPIO edge detected ({previous} -> {current}); capturing frame"
             )
             try:
                 queue.put(capture_frame())
